@@ -7,6 +7,9 @@
 - `index.html`：页面结构与表单、汇总区、商品列表。
 - `styles.css`：响应式界面样式。
 - `app.js`：数据存储、校验、日均成本计算、使用中/已归档切换。
+- `package.json`：提供 Cloudflare Pages 可执行的 `npm run build` 构建命令。
+- `.gitignore`：忽略本地和 Cloudflare 构建生成的 `dist/` 目录。
+- `README.md`：说明本地验证方式与 Cloudflare Pages 自动部署配置。
 - 数据保存在浏览器 `localStorage` 的 `cost-ledger-items` 键中。
 - 当商品 `endDate` 早于浏览器当天日期时，自动进入已归档列表，不再计入当前日均成本；结束日期当天仍算作使用中。
 
@@ -14,6 +17,8 @@
 
 - 保持无构建依赖的静态前端实现，除非用户明确要求引入框架或后端。
 - 修改计算逻辑时优先保持函数小而可验证：`getInclusiveDays`、`isArchived`、`getDailyCost`。
+- Cloudflare Pages 部署使用 `npm run build`，输出目录为 `dist`；保持构建脚本只复制实际发布所需的静态文件。
+- `dist/` 是构建产物，不提交到仓库。
 - 只做和用户需求直接相关的改动，不进行无关重构、批量格式化、重命名或清理。
 - 禁止批量删除文件或目录；需要删除文件时只能一次删除一个明确路径的文件。
-- 每次改动后运行最相关验证，例如 `node --check app.js`，并按需要补充本文件中的项目说明。
+- 每次改动后运行最相关验证，例如 `node --check app.js` 和 `npm run build`，并按需要补充本文件中的项目说明。
