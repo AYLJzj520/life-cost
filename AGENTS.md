@@ -8,13 +8,14 @@
 - `styles.css`：响应式界面样式。
 - `app.js`：前端表单校验、日均成本计算、使用中/已归档切换，并通过 `/api/items` 读写数据。
 - `functions/api/items.js`：Pages Function API，负责从 D1 列表读取和新增商品。
-- `functions/api/items/[id].js`：Pages Function API，负责按 ID 删除商品。
+- `functions/api/items/[id].js`：Pages Function API，负责按 ID 更新结束日期和删除商品。
 - `schema.sql`：Cloudflare D1 数据库表结构。
 - `package.json`：提供 Cloudflare Pages 可执行的 `npm run build` 构建命令。
 - `.gitignore`：忽略本地和 Cloudflare 构建生成的 `dist/` 目录。
 - `README.md`：说明本地验证方式与 Cloudflare Pages 自动部署配置。
 - 数据保存在 Cloudflare D1 的 `items` 表中，Pages Function 通过绑定名 `DB` 访问数据库。
 - 当商品 `endDate` 早于浏览器当天日期时，自动进入已归档列表，不再计入当前日均成本；结束日期当天仍算作使用中。
+- 使用中的商品支持通过 `+1天` / `-1天` 调整结束日期，并基于新天数重新计算日均成本；结束日期不能早于使用日期。
 
 ## 维护约定
 

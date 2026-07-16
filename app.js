@@ -33,6 +33,19 @@ function parseLocalDate(dateString) {
   return new Date(year, month - 1, day);
 }
 
+function formatLocalDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(dateString, dayDelta) {
+  const date = parseLocalDate(dateString);
+  date.setDate(date.getDate() + dayDelta);
+  return formatLocalDate(date);
+}
+
 function getInclusiveDays(startDate, endDate) {
   const start = parseLocalDate(startDate);
   const end = parseLocalDate(endDate);
@@ -130,6 +143,31 @@ async function deleteItem(id) {
   }
 }
 
+async function updateEndDate(item, dayDelta) {
+  const nextEndDate = addDays(item.endDate, dayDelta);
+
+  if (nextEndDate < item.startDate) {
+    elements.formError.textContent = "结束日期不能早于使用日期";
+    return;
+  }
+
+  try {
+    const data = await fetchJson(`/api/items/${encodeURIComponent(item.id)}`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ endDate: nextEndDate }),
+    });
+
+    state.items = state.items.map((currentItem) => (currentItem.id === item.id ? data.item : currentItem));
+    elements.formError.textContent = "";
+    render();
+  } catch (error) {
+    elements.formError.textContent = error.message;
+  }
+}
+
 function renderSummary() {
   const today = getTodayDateString();
   const activeItems = state.items.filter((item) => !isArchived(item, today));
@@ -152,8 +190,9 @@ function renderRows() {
   elements.emptyState.classList.toggle("is-visible", visibleItems.length === 0);
 
   visibleItems.forEach((item) => {
+    const archived = isArchived(item, today);
     const row = document.createElement("tr");
-    row.className = isArchived(item, today) ? "archived-row" : "";
+    row.className = archived ? "archived-row" : "";
 
     row.innerHTML = `
       <td class="name-cell"></td>
@@ -161,7 +200,7 @@ function renderRows() {
       <td class="muted"></td>
       <td></td>
       <td><span class="cost-chip"></span></td>
-      <td><button class="icon-button" type="button" title="删除" aria-label="删除">×</button></td>
+      <td><div class="row-actions"></div></td>
     `;
 
     row.children[0].textContent = item.name;
@@ -169,7 +208,37 @@ function renderRows() {
     row.children[2].textContent = formatDateRange(item);
     row.children[3].textContent = `${getInclusiveDays(item.startDate, item.endDate)} 天`;
     row.querySelector(".cost-chip").textContent = formatCurrency(getDailyCost(item));
-    row.querySelector("button").addEventListener("click", () => deleteItem(item.id));
+
+    const actions = row.querySelector(".row-actions");
+
+    if (!archived) {
+      const subtractButton = document.createElement("button");
+      subtractButton.className = "day-button";
+      subtractButton.type = "button";
+      subtractButton.textContent = "-1天";
+      subtractButton.disabled = item.endDate <= item.startDate;
+      subtractButton.title = "结束日期减少 1 天";
+      subtractButton.addEventListener("click", () => updateEndDate(item, -1));
+      actions.append(subtractButton);
+
+      const addButton = document.createElement("button");
+      addButton.className = "day-button";
+      addButton.type = "button";
+      addButton.textContent = "+1天";
+      addButton.title = "结束日期增加 1 天";
+      addButton.addEventListener("click", () => updateEndDate(item, 1));
+      actions.append(addButton);
+    }
+
+    const deleteButton = document.createElement("button");
+    deleteButton.className = "icon-button";
+    deleteButton.type = "button";
+    deleteButton.title = "删除";
+    deleteButton.setAttribute("aria-label", "删除");
+    deleteButton.textContent = "×";
+    deleteButton.addEventListener("click", () => deleteItem(item.id));
+    actions.append(deleteButton);
+
     elements.itemRows.append(row);
   });
 }
