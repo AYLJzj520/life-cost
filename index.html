@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>商品日均成本</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Cost Ledger</p>
+          <h1>商品日均成本</h1>
+        </div>
+        <div class="today-pill" id="todayText"></div>
+      </header>
+
+      <section class="summary-band" aria-label="成本汇总">
+        <div class="summary-item">
+          <span>当前日均成本</span>
+          <strong id="activeDailyCost">¥0.00</strong>
+        </div>
+        <div class="summary-item">
+          <span>使用中商品</span>
+          <strong id="activeCount">0</strong>
+        </div>
+        <div class="summary-item">
+          <span>已归档商品</span>
+          <strong id="archivedCount">0</strong>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <form class="entry-panel" id="itemForm">
+          <h2>新增商品</h2>
+          <label>
+            商品名称
+            <input id="nameInput" name="name" type="text" autocomplete="off" required />
+          </label>
+          <label>
+            购买价格
+            <input id="priceInput" name="price" type="number" min="0.01" step="0.01" required />
+          </label>
+          <div class="date-grid">
+            <label>
+              使用日期
+              <input id="startDateInput" name="startDate" type="date" required />
+            </label>
+            <label>
+              结束日期
+              <input id="endDateInput" name="endDate" type="date" required />
+            </label>
+          </div>
+          <p class="form-error" id="formError" role="alert"></p>
+          <button class="primary-button" type="submit">添加商品</button>
+        </form>
+
+        <section class="list-panel" aria-label="商品列表">
+          <div class="tabs" role="tablist" aria-label="商品状态">
+            <button class="tab is-active" id="activeTab" type="button" role="tab">使用中</button>
+            <button class="tab" id="archivedTab" type="button" role="tab">已归档</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>商品</th>
+                  <th>价格</th>
+                  <th>使用区间</th>
+                  <th>天数</th>
+                  <th>日均</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="itemRows"></tbody>
+            </table>
+            <div class="empty-state" id="emptyState">暂无商品</div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
