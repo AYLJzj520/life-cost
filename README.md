@@ -1,11 +1,13 @@
 # 商品日均成本
 
-一个无后端依赖的本地商品日均成本记录工具。数据保存在浏览器 `localStorage` 中，适合通过 Cloudflare Pages 托管为静态网站。
+一个商品日均成本记录工具。页面通过 Cloudflare Pages 托管，数据通过 Pages Functions 写入 Cloudflare D1 数据库。
 
 ## 本地验证
 
 ```sh
 node --check app.js
+node --check functions/api/items.js
+node --check 'functions/api/items/[id].js'
 npm run build
 ```
 
@@ -22,7 +24,7 @@ npm run build
 - 生产分支：`main`
 - 构建命令：`npm run build`
 - 构建输出目录：`dist`
-- 环境变量：无需配置
+- D1 绑定名：`DB`
 
 部署步骤：
 
@@ -31,6 +33,39 @@ npm run build
 3. 选择 `Pages`，连接 GitHub，并授权访问 `AYLJzj520/life-cost` 仓库。
 4. 选择仓库后按上面的推荐设置填写构建配置。
 5. 创建项目并等待首次部署完成。
-6. 之后只要把代码推送到 GitHub 的 `main` 分支，Cloudflare Pages 就会自动更新线上项目。
+6. 创建 D1 数据库并初始化表结构。
+7. 在 Pages 项目中把 D1 数据库绑定为 `DB`。
+8. 重新部署项目。
+9. 之后只要把代码推送到 GitHub 的 `main` 分支，Cloudflare Pages 就会自动更新线上项目。
+
+## D1 数据库配置
+
+### 方式一：Cloudflare Dashboard
+
+1. 进入 Cloudflare Dashboard。
+2. 打开 `Workers & Pages` > `D1 SQL Database`。
+3. 选择 `Create database`，数据库名建议使用 `life-cost-db`。
+4. 创建后进入该数据库的 `Console`。
+5. 复制 [schema.sql](./schema.sql) 的内容并执行，创建 `items` 表。
+6. 回到 Pages 项目，进入 `Settings` > `Bindings`。
+7. 添加 `D1 database` 绑定：
+   - Variable name：`DB`
+   - D1 database：选择刚创建的 `life-cost-db`
+8. 保存后重新部署 Pages 项目。
+
+### 方式二：Wrangler CLI
+
+```sh
+npx wrangler d1 create life-cost-db
+npx wrangler d1 execute life-cost-db --remote --file=./schema.sql
+```
+
+然后在 Cloudflare Pages 项目的 `Settings` > `Bindings` 中添加 D1 绑定，变量名必须是 `DB`。
+
+## 数据保存位置
+
+商品数据会保存在 Cloudflare D1 的 `items` 表中，不再保存到浏览器 `localStorage`。
+
+当前版本没有登录系统，所以任何能访问网站的人都会使用同一个数据库。只给自己用时，建议通过 Cloudflare Access 或其他访问控制方式限制网站访问。
 
 如果需要自定义域名，可以在 Pages 项目的 `Custom domains` 中添加域名，并按 Cloudflare 提示完成 DNS 配置。

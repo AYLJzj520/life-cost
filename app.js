@@ -1,7 +1,5 @@
-const storageKey = "cost-ledger-items";
-
 const state = {
-  items: loadItems(),
+  items: [],
   view: "active",
 };
 
@@ -62,27 +60,12 @@ function formatDateRange(item) {
   return `${item.startDate} 至 ${item.endDate}`;
 }
 
-function loadItems() {
-  try {
-    const rawItems = localStorage.getItem(storageKey);
-    return rawItems ? JSON.parse(rawItems) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveItems() {
-  localStorage.setItem(storageKey, JSON.stringify(state.items));
-}
-
 function createItem(formData) {
   return {
-    id: crypto.randomUUID(),
     name: formData.get("name").trim(),
     price: Number(formData.get("price")),
     startDate: formData.get("startDate"),
     endDate: formData.get("endDate"),
-    createdAt: new Date().toISOString(),
   };
 }
 
@@ -113,10 +96,38 @@ function setView(view) {
   render();
 }
 
-function deleteItem(id) {
-  state.items = state.items.filter((item) => item.id !== id);
-  saveItems();
-  render();
+async function fetchJson(url, options) {
+  const response = await fetch(url, options);
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.error || "请求失败，请稍后重试");
+  }
+
+  return data;
+}
+
+async function loadItems() {
+  try {
+    const data = await fetchJson("/api/items");
+    state.items = data.items || [];
+    elements.formError.textContent = "";
+    render();
+  } catch (error) {
+    elements.formError.textContent = error.message;
+  }
+}
+
+async function deleteItem(id) {
+  try {
+    await fetchJson(`/api/items/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    state.items = state.items.filter((item) => item.id !== id);
+    render();
+  } catch (error) {
+    elements.formError.textContent = error.message;
+  }
 }
 
 function renderSummary() {
@@ -168,7 +179,7 @@ function render() {
   renderRows();
 }
 
-function handleSubmit(event) {
+async function handleSubmit(event) {
   event.preventDefault();
   const item = createItem(new FormData(elements.form));
   const error = validateItem(item);
@@ -179,11 +190,23 @@ function handleSubmit(event) {
   }
 
   elements.formError.textContent = "";
-  state.items.push(item);
-  saveItems();
-  elements.form.reset();
-  elements.startDateInput.value = getTodayDateString();
-  render();
+
+  try {
+    const data = await fetchJson("/api/items", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(item),
+    });
+
+    state.items.unshift(data.item);
+    elements.form.reset();
+    elements.startDateInput.value = getTodayDateString();
+    render();
+  } catch (requestError) {
+    elements.formError.textContent = requestError.message;
+  }
 }
 
 elements.form.addEventListener("submit", handleSubmit);
@@ -191,3 +214,4 @@ elements.activeTab.addEventListener("click", () => setView("active"));
 elements.archivedTab.addEventListener("click", () => setView("archived"));
 elements.startDateInput.value = getTodayDateString();
 render();
+loadItems();
