@@ -104,7 +104,17 @@ export async function onRequestPatch(context) {
     return json({ error: "请求数据格式不正确" }, 400);
   }
 
-  if (!isDateString(payload.endDate)) {
+  const updates = {};
+
+  if ("autoRenew" in payload) {
+    updates.autoRenew = Boolean(payload.autoRenew);
+  }
+
+  if (!("endDate" in payload) && !("autoRenew" in payload)) {
+    return json({ error: "没有可更新的内容" }, 400);
+  }
+
+  if ("endDate" in payload && !isDateString(payload.endDate)) {
     return json({ error: "请选择有效结束日期" }, 400);
   }
 
@@ -112,6 +122,19 @@ export async function onRequestPatch(context) {
 
   if (!item) {
     return json({ error: "商品不存在" }, 404);
+  }
+
+  if (!("endDate" in payload)) {
+    await context.env.DB.prepare("UPDATE items SET auto_renew = ? WHERE id = ?")
+      .bind(updates.autoRenew ? 1 : 0, id)
+      .run();
+
+    return json({
+      item: {
+        ...item,
+        autoRenew: updates.autoRenew,
+      },
+    });
   }
 
   if (payload.endDate < item.startDate) {
@@ -124,8 +147,8 @@ export async function onRequestPatch(context) {
     return json({ error: "使用区间至少需要包含 1 天" }, 400);
   }
 
-  await context.env.DB.prepare("UPDATE items SET end_date = ?, planned_days = ? WHERE id = ?")
-    .bind(payload.endDate, plannedDays, id)
+  await context.env.DB.prepare("UPDATE items SET end_date = ?, planned_days = ?, auto_renew = ? WHERE id = ?")
+    .bind(payload.endDate, plannedDays, "autoRenew" in updates ? (updates.autoRenew ? 1 : 0) : (item.autoRenew ? 1 : 0), id)
     .run();
 
   return json({
@@ -133,6 +156,7 @@ export async function onRequestPatch(context) {
       ...item,
       endDate: payload.endDate,
       plannedDays,
+      autoRenew: "autoRenew" in updates ? updates.autoRenew : item.autoRenew,
     },
   });
 }

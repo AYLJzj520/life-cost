@@ -1,6 +1,7 @@
 const state = {
   items: [],
   view: "active",
+  editingItemId: "",
 };
 
 const elements = {
@@ -24,6 +25,12 @@ const elements = {
   archivedTab: document.querySelector("#archivedTab"),
   itemRows: document.querySelector("#itemRows"),
   emptyState: document.querySelector("#emptyState"),
+  editDialog: document.querySelector("#editDialog"),
+  editForm: document.querySelector("#editForm"),
+  editItemName: document.querySelector("#editItemName"),
+  editAutoRenewInput: document.querySelector("#editAutoRenewInput"),
+  editCancelButton: document.querySelector("#editCancelButton"),
+  editError: document.querySelector("#editError"),
 };
 
 function getTodayDateString() {
@@ -269,6 +276,46 @@ async function updateEndDate(item, dayDelta) {
   }
 }
 
+function openEditDialog(item) {
+  state.editingItemId = item.id;
+  elements.editItemName.textContent = item.name;
+  elements.editAutoRenewInput.checked = item.autoRenew;
+  elements.editError.textContent = "";
+  elements.editDialog.hidden = false;
+}
+
+function closeEditDialog() {
+  state.editingItemId = "";
+  elements.editForm.reset();
+  elements.editDialog.hidden = true;
+}
+
+async function handleEditSubmit(event) {
+  event.preventDefault();
+  const item = state.items.find((currentItem) => currentItem.id === state.editingItemId);
+
+  if (!item) {
+    closeEditDialog();
+    return;
+  }
+
+  try {
+    const data = await fetchJson(`/api/items/${encodeURIComponent(item.id)}`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ autoRenew: elements.editAutoRenewInput.checked }),
+    });
+
+    state.items = state.items.map((currentItem) => (currentItem.id === item.id ? data.item : currentItem));
+    closeEditDialog();
+    render();
+  } catch (error) {
+    elements.editError.textContent = error.message;
+  }
+}
+
 function renderSummary() {
   const today = getTodayDateString();
   const activeItems = state.items.filter((item) => !isArchived(item, today));
@@ -333,6 +380,14 @@ function renderRows() {
     row.querySelector(".cost-chip").textContent = formatCurrency(getDailyCost(item));
 
     const actions = row.querySelector(".row-actions");
+
+    const editButton = document.createElement("button");
+    editButton.className = "edit-button";
+    editButton.type = "button";
+    editButton.textContent = "编辑";
+    editButton.title = "编辑自动续期";
+    editButton.addEventListener("click", () => openEditDialog(item));
+    actions.append(editButton);
 
     if (!archived) {
       const subtractButton = document.createElement("button");
@@ -403,6 +458,13 @@ async function handleSubmit(event) {
 }
 
 elements.form.addEventListener("submit", handleSubmit);
+elements.editForm.addEventListener("submit", handleEditSubmit);
+elements.editCancelButton.addEventListener("click", closeEditDialog);
+elements.editDialog.addEventListener("click", (event) => {
+  if (event.target === elements.editDialog) {
+    closeEditDialog();
+  }
+});
 elements.endModeInputs.forEach((input) => input.addEventListener("change", syncEndModeFields));
 elements.activeTab.addEventListener("click", () => setView("active"));
 elements.archivedTab.addEventListener("click", () => setView("archived"));
