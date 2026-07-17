@@ -1,6 +1,6 @@
-# 商品日均成本
+# 每日平均固定支出
 
-一个商品日均成本记录工具。页面通过 Cloudflare Pages 托管，数据通过 Pages Functions 写入 Cloudflare D1 数据库。
+一个每日平均固定支出记录工具。页面通过 Cloudflare Pages 托管，数据通过 Pages Functions 写入 Cloudflare D1 数据库。
 
 ## 本地验证
 
