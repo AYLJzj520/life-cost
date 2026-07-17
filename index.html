@@ -47,9 +47,33 @@
               使用日期
               <input id="startDateInput" name="startDate" type="date" required />
             </label>
-            <label>
+            <label id="endDateField">
               结束日期
               <input id="endDateInput" name="endDate" type="date" required />
+            </label>
+          </div>
+          <div class="segmented-control" role="radiogroup" aria-label="结束方式">
+            <label>
+              <input type="radio" name="endMode" value="date" checked />
+              选择日期
+            </label>
+            <label>
+              <input type="radio" name="endMode" value="duration" />
+              预计天数
+            </label>
+          </div>
+          <label class="duration-field" id="plannedDaysField">
+            预计使用天数
+            <input id="plannedDaysInput" name="plannedDays" type="number" min="1" step="1" />
+          </label>
+          <div class="option-grid">
+            <label class="check-option">
+              <input id="excludeWeekendsInput" name="excludeWeekends" type="checkbox" />
+              不包含周末
+            </label>
+            <label class="check-option">
+              <input id="autoRenewInput" name="autoRenew" type="checkbox" />
+              到期后自动续期
             </label>
           </div>
           <p class="form-error" id="formError" role="alert"></p>

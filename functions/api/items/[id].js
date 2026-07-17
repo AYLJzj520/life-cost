@@ -11,8 +11,62 @@ function isDateString(value) {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
+function normalizeItem(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    price: row.price,
+    startDate: row.startDate,
+    endDate: row.endDate,
+    endMode: row.endMode || "date",
+    plannedDays: row.plannedDays,
+    excludeWeekends: Boolean(row.excludeWeekends),
+    autoRenew: Boolean(row.autoRenew),
+    renewedFromId: row.renewedFromId,
+    createdAt: row.createdAt,
+  };
+}
+
+function parseLocalDate(dateString) {
+  const [year, month, day] = dateString.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function formatLocalDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(dateString, dayDelta) {
+  const date = parseLocalDate(dateString);
+  date.setDate(date.getDate() + dayDelta);
+  return formatLocalDate(date);
+}
+
+function isWeekend(dateString) {
+  const day = parseLocalDate(dateString).getDay();
+  return day === 0 || day === 6;
+}
+
+function getUsageDays(startDate, endDate, excludeWeekends) {
+  let days = 0;
+  let currentDate = startDate;
+
+  while (currentDate <= endDate) {
+    if (!excludeWeekends || !isWeekend(currentDate)) {
+      days += 1;
+    }
+
+    currentDate = addDays(currentDate, 1);
+  }
+
+  return days;
+}
+
 async function getItem(db, id) {
-  return db
+  const item = await db
     .prepare(
       `SELECT
         id,
@@ -20,12 +74,19 @@ async function getItem(db, id) {
         price,
         start_date AS startDate,
         end_date AS endDate,
+        end_mode AS endMode,
+        planned_days AS plannedDays,
+        exclude_weekends AS excludeWeekends,
+        auto_renew AS autoRenew,
+        renewed_from_id AS renewedFromId,
         created_at AS createdAt
       FROM items
       WHERE id = ?`,
     )
     .bind(id)
     .first();
+
+  return item ? normalizeItem(item) : null;
 }
 
 export async function onRequestPatch(context) {
@@ -57,12 +118,21 @@ export async function onRequestPatch(context) {
     return json({ error: "结束日期不能早于使用日期" }, 400);
   }
 
-  await context.env.DB.prepare("UPDATE items SET end_date = ? WHERE id = ?").bind(payload.endDate, id).run();
+  const plannedDays = getUsageDays(item.startDate, payload.endDate, item.excludeWeekends);
+
+  if (plannedDays <= 0) {
+    return json({ error: "使用区间至少需要包含 1 天" }, 400);
+  }
+
+  await context.env.DB.prepare("UPDATE items SET end_date = ?, planned_days = ? WHERE id = ?")
+    .bind(payload.endDate, plannedDays, id)
+    .run();
 
   return json({
     item: {
       ...item,
       endDate: payload.endDate,
+      plannedDays,
     },
   });
 }

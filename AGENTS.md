@@ -10,18 +10,21 @@
 - `functions/api/items.js`：Pages Function API，负责从 D1 列表读取和新增商品。
 - `functions/api/items/[id].js`：Pages Function API，负责按 ID 更新结束日期和删除商品。
 - `schema.sql`：Cloudflare D1 数据库表结构。
+- `migrations/`：线上 D1 已存在表结构的增量迁移 SQL。
 - `package.json`：提供 Cloudflare Pages 可执行的 `npm run build` 构建命令。
 - `.gitignore`：忽略本地和 Cloudflare 构建生成的 `dist/` 目录。
 - `README.md`：说明本地验证方式与 Cloudflare Pages 自动部署配置。
 - 数据保存在 Cloudflare D1 的 `items` 表中，Pages Function 通过绑定名 `DB` 访问数据库。
 - 当商品 `endDate` 早于浏览器当天日期时，自动进入已归档列表，不再计入当前日均成本；结束日期当天仍算作使用中。
 - 使用中的商品支持通过 `+1天` / `-1天` 调整结束日期，并基于新天数重新计算日均成本；结束日期不能早于使用日期。
+- 新增商品支持按结束日期或预计使用天数设置周期，可选择不包含周末；勾选自动续期后，到期归档并生成下一周期的同名商品。
 
 ## 维护约定
 
 - 保持无构建依赖的静态前端实现，除非用户明确要求引入框架或后端。
 - 修改计算逻辑时优先保持函数小而可验证：`getInclusiveDays`、`isArchived`、`getDailyCost`。
 - 修改数据结构时同步更新 `schema.sql`、Pages Functions 和 `README.md` 的部署说明。
+- 修改已上线数据库字段时新增 `migrations/` 迁移文件，并在部署前后确认线上 D1 已执行迁移。
 - Cloudflare Pages 部署使用 `npm run build`，输出目录为 `dist`；保持构建脚本只复制实际发布所需的静态文件。
 - Cloudflare D1 绑定名固定为 `DB`，不要在代码中改成其他名字，除非同步更新部署文档。
 - `dist/` 是构建产物，不提交到仓库。

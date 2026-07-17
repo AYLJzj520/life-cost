@@ -8,7 +8,13 @@ const elements = {
   nameInput: document.querySelector("#nameInput"),
   priceInput: document.querySelector("#priceInput"),
   startDateInput: document.querySelector("#startDateInput"),
+  endDateField: document.querySelector("#endDateField"),
   endDateInput: document.querySelector("#endDateInput"),
+  endModeInputs: document.querySelectorAll("input[name='endMode']"),
+  plannedDaysField: document.querySelector("#plannedDaysField"),
+  plannedDaysInput: document.querySelector("#plannedDaysInput"),
+  excludeWeekendsInput: document.querySelector("#excludeWeekendsInput"),
+  autoRenewInput: document.querySelector("#autoRenewInput"),
   formError: document.querySelector("#formError"),
   todayText: document.querySelector("#todayText"),
   activeDailyCost: document.querySelector("#activeDailyCost"),
@@ -46,6 +52,65 @@ function addDays(dateString, dayDelta) {
   return formatLocalDate(date);
 }
 
+function isWeekend(date) {
+  const day = date.getDay();
+  return day === 0 || day === 6;
+}
+
+function isIncludedDate(dateString, excludeWeekends) {
+  return !excludeWeekends || !isWeekend(parseLocalDate(dateString));
+}
+
+function addUsageDays(dateString, dayDelta, excludeWeekends) {
+  let nextDate = dateString;
+  let remainingDays = Math.abs(dayDelta);
+  const step = dayDelta >= 0 ? 1 : -1;
+
+  while (remainingDays > 0) {
+    nextDate = addDays(nextDate, step);
+
+    if (isIncludedDate(nextDate, excludeWeekends)) {
+      remainingDays -= 1;
+    }
+  }
+
+  return nextDate;
+}
+
+function getUsageDays(startDate, endDate, excludeWeekends = false) {
+  if (!excludeWeekends) {
+    return getInclusiveDays(startDate, endDate);
+  }
+
+  let days = 0;
+  let currentDate = startDate;
+
+  while (currentDate <= endDate) {
+    if (isIncludedDate(currentDate, true)) {
+      days += 1;
+    }
+
+    currentDate = addDays(currentDate, 1);
+  }
+
+  return days;
+}
+
+function getEndDateFromUsageDays(startDate, plannedDays, excludeWeekends) {
+  let endDate = startDate;
+  let countedDays = isIncludedDate(startDate, excludeWeekends) ? 1 : 0;
+
+  while (countedDays < plannedDays) {
+    endDate = addDays(endDate, 1);
+
+    if (isIncludedDate(endDate, excludeWeekends)) {
+      countedDays += 1;
+    }
+  }
+
+  return endDate;
+}
+
 function getInclusiveDays(startDate, endDate) {
   const start = parseLocalDate(startDate);
   const end = parseLocalDate(endDate);
@@ -58,7 +123,7 @@ function isArchived(item, today = getTodayDateString()) {
 }
 
 function getDailyCost(item) {
-  return Number(item.price) / getInclusiveDays(item.startDate, item.endDate);
+  return Number(item.price) / getUsageDays(item.startDate, item.endDate, item.excludeWeekends);
 }
 
 function formatCurrency(value) {
@@ -73,12 +138,27 @@ function formatDateRange(item) {
   return `${item.startDate} 至 ${item.endDate}`;
 }
 
+function getEndMode() {
+  return document.querySelector("input[name='endMode']:checked").value;
+}
+
 function createItem(formData) {
+  const endMode = formData.get("endMode");
+  const excludeWeekends = formData.get("excludeWeekends") === "on";
+  const plannedDays = Number(formData.get("plannedDays"));
+  const startDate = formData.get("startDate");
+  const endDate =
+    endMode === "duration" ? getEndDateFromUsageDays(startDate, plannedDays, excludeWeekends) : formData.get("endDate");
+
   return {
     name: formData.get("name").trim(),
     price: Number(formData.get("price")),
-    startDate: formData.get("startDate"),
-    endDate: formData.get("endDate"),
+    startDate,
+    endDate,
+    endMode,
+    plannedDays: endMode === "duration" ? plannedDays : null,
+    excludeWeekends,
+    autoRenew: formData.get("autoRenew") === "on",
   };
 }
 
@@ -91,15 +171,36 @@ function validateItem(item) {
     return "请输入有效价格";
   }
 
-  if (!item.startDate || !item.endDate) {
-    return "请选择使用日期和结束日期";
+  if (!item.startDate) {
+    return "请选择使用日期";
+  }
+
+  if (item.endMode === "duration" && (!Number.isInteger(item.plannedDays) || item.plannedDays <= 0)) {
+    return "请输入有效预计使用天数";
+  }
+
+  if (item.endMode === "date" && !item.endDate) {
+    return "请选择结束日期";
   }
 
   if (item.endDate < item.startDate) {
     return "结束日期不能早于使用日期";
   }
 
+  if (getUsageDays(item.startDate, item.endDate, item.excludeWeekends) <= 0) {
+    return "使用区间至少需要包含 1 天";
+  }
+
   return "";
+}
+
+function syncEndModeFields() {
+  const endMode = getEndMode();
+
+  elements.endDateField.classList.toggle("is-hidden", endMode !== "date");
+  elements.endDateInput.required = endMode === "date";
+  elements.plannedDaysField.classList.toggle("is-visible", endMode === "duration");
+  elements.plannedDaysInput.required = endMode === "duration";
 }
 
 function setView(view) {
@@ -144,7 +245,7 @@ async function deleteItem(id) {
 }
 
 async function updateEndDate(item, dayDelta) {
-  const nextEndDate = addDays(item.endDate, dayDelta);
+  const nextEndDate = addUsageDays(item.endDate, dayDelta, item.excludeWeekends);
 
   if (nextEndDate < item.startDate) {
     elements.formError.textContent = "结束日期不能早于使用日期";
@@ -206,7 +307,29 @@ function renderRows() {
     row.children[0].textContent = item.name;
     row.children[1].textContent = formatCurrency(item.price);
     row.children[2].textContent = formatDateRange(item);
-    row.children[3].textContent = `${getInclusiveDays(item.startDate, item.endDate)} 天`;
+    row.children[3].innerHTML = "";
+
+    const dayCount = document.createElement("span");
+    dayCount.textContent = `${getUsageDays(item.startDate, item.endDate, item.excludeWeekends)} 天`;
+    row.children[3].append(dayCount);
+
+    const tags = [];
+
+    if (item.excludeWeekends) {
+      tags.push("不含周末");
+    }
+
+    if (item.autoRenew) {
+      tags.push("续期");
+    }
+
+    tags.forEach((tag) => {
+      const tagElement = document.createElement("span");
+      tagElement.className = "meta-tag";
+      tagElement.textContent = tag;
+      row.children[3].append(tagElement);
+    });
+
     row.querySelector(".cost-chip").textContent = formatCurrency(getDailyCost(item));
 
     const actions = row.querySelector(".row-actions");
@@ -272,6 +395,7 @@ async function handleSubmit(event) {
     state.items.unshift(data.item);
     elements.form.reset();
     elements.startDateInput.value = getTodayDateString();
+    syncEndModeFields();
     render();
   } catch (requestError) {
     elements.formError.textContent = requestError.message;
@@ -279,8 +403,10 @@ async function handleSubmit(event) {
 }
 
 elements.form.addEventListener("submit", handleSubmit);
+elements.endModeInputs.forEach((input) => input.addEventListener("change", syncEndModeFields));
 elements.activeTab.addEventListener("click", () => setView("active"));
 elements.archivedTab.addEventListener("click", () => setView("archived"));
 elements.startDateInput.value = getTodayDateString();
+syncEndModeFields();
 render();
 loadItems();

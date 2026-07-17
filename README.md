@@ -68,4 +68,14 @@ npx wrangler d1 execute life-cost-db --remote --file=./schema.sql
 
 当前版本没有登录系统，所以任何能访问网站的人都会使用同一个数据库。只给自己用时，建议通过 Cloudflare Access 或其他访问控制方式限制网站访问。
 
+## 数据库变更
+
+已有数据库升级时，按时间顺序执行 `migrations/` 目录中的 SQL 文件。当前线上数据库需要执行：
+
+```sh
+npx wrangler d1 execute life-cost-db --remote --file=./migrations/20260717_add_usage_options.sql
+```
+
+这次升级会为商品增加结束方式、预计天数、不包含周末、自动续期和续期来源字段。
+
 如果需要自定义域名，可以在 Pages 项目的 `Custom domains` 中添加域名，并按 Cloudflare 提示完成 DNS 配置。
