@@ -414,6 +414,7 @@ function renderRows() {
       <td></td>
       <td class="muted"></td>
       <td></td>
+      <td></td>
       <td><span class="cost-chip"></span></td>
       <td><div class="row-actions"></div></td>
     `;
@@ -427,12 +428,7 @@ function renderRows() {
     dayCount.textContent = `${getUsageDays(item.startDate, item.endDate, item.excludeWeekends)} 天`;
     row.children[3].append(dayCount);
 
-    if (!archived) {
-      const remainingDays = document.createElement("span");
-      remainingDays.className = "meta-tag";
-      remainingDays.textContent = `预计剩余 ${getRemainingUsageDays(item, today)} 天`;
-      row.children[3].append(remainingDays);
-    }
+    row.children[4].textContent = archived ? "-" : `${getRemainingUsageDays(item, today)} 天`;
 
     const tags = [];
 
