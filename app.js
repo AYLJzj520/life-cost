@@ -15,6 +15,7 @@ const elements = {
   startDateInput: document.querySelector("#startDateInput"),
   endDateField: document.querySelector("#endDateField"),
   endDateInput: document.querySelector("#endDateInput"),
+  endModeField: document.querySelector("#endModeField"),
   endModeInputs: document.querySelectorAll("input[name='endMode']"),
   plannedDaysField: document.querySelector("#plannedDaysField"),
   plannedDaysInput: document.querySelector("#plannedDaysInput"),
@@ -61,6 +62,16 @@ function addDays(dateString, dayDelta) {
   const date = parseLocalDate(dateString);
   date.setDate(date.getDate() + dayDelta);
   return formatLocalDate(date);
+}
+
+function getNaturalWeekRange(dateString, excludeWeekends) {
+  const date = parseLocalDate(dateString);
+  const day = date.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const startDate = formatLocalDate(new Date(date.getFullYear(), date.getMonth(), date.getDate() + mondayOffset));
+  const endDate = addDays(startDate, excludeWeekends ? 4 : 6);
+
+  return { startDate, endDate };
 }
 
 function isWeekend(date) {
@@ -166,9 +177,15 @@ function createItem(formData) {
   const endMode = formData.get("endMode");
   const excludeWeekends = formData.get("excludeWeekends") === "on";
   const plannedDays = Number(formData.get("plannedDays"));
-  const startDate = formData.get("startDate");
+  let startDate = formData.get("startDate");
+  const weekRange = costMode === "daily" ? getNaturalWeekRange(startDate, excludeWeekends) : null;
   const endDate =
-    endMode === "duration" ? getEndDateFromUsageDays(startDate, plannedDays, excludeWeekends) : formData.get("endDate");
+    weekRange
+      ? weekRange.endDate
+      : endMode === "duration"
+        ? getEndDateFromUsageDays(startDate, plannedDays, excludeWeekends)
+        : formData.get("endDate");
+  startDate = weekRange ? weekRange.startDate : startDate;
   const usageDays = startDate && endDate ? getUsageDays(startDate, endDate, excludeWeekends) : 0;
   const dailyCost = Number(formData.get("dailyCost"));
 
@@ -179,8 +196,8 @@ function createItem(formData) {
     costMode,
     startDate,
     endDate,
-    endMode,
-    plannedDays: endMode === "duration" ? plannedDays : null,
+    endMode: costMode === "daily" ? "duration" : endMode,
+    plannedDays: costMode === "daily" ? usageDays : endMode === "duration" ? plannedDays : null,
     excludeWeekends,
     autoRenew: formData.get("autoRenew") === "on",
   };
@@ -233,15 +250,22 @@ function syncCostModeFields() {
   elements.priceInput.required = costMode === "total";
   elements.dailyCostField.classList.toggle("is-visible", costMode === "daily");
   elements.dailyCostInput.required = costMode === "daily";
+  elements.endModeField.classList.toggle("is-hidden", costMode === "daily");
+  elements.endDateField.classList.toggle("is-hidden", costMode === "daily" || getEndMode() !== "date");
+  elements.endDateInput.required = costMode !== "daily" && getEndMode() === "date";
+  elements.plannedDaysField.classList.toggle("is-visible", costMode !== "daily" && getEndMode() === "duration");
+  elements.plannedDaysInput.required = costMode !== "daily" && getEndMode() === "duration";
 }
 
 function syncEndModeFields() {
+  const costMode = getCostMode();
   const endMode = getEndMode();
 
-  elements.endDateField.classList.toggle("is-hidden", endMode !== "date");
-  elements.endDateInput.required = endMode === "date";
-  elements.plannedDaysField.classList.toggle("is-visible", endMode === "duration");
-  elements.plannedDaysInput.required = endMode === "duration";
+  elements.endModeField.classList.toggle("is-hidden", costMode === "daily");
+  elements.endDateField.classList.toggle("is-hidden", costMode === "daily" || endMode !== "date");
+  elements.endDateInput.required = costMode !== "daily" && endMode === "date";
+  elements.plannedDaysField.classList.toggle("is-visible", costMode !== "daily" && endMode === "duration");
+  elements.plannedDaysInput.required = costMode !== "daily" && endMode === "duration";
 }
 
 function setView(view) {

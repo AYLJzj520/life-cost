@@ -40,6 +40,16 @@ function addDays(dateString, dayDelta) {
   return formatLocalDate(date);
 }
 
+function getNaturalWeekRange(dateString, excludeWeekends) {
+  const date = parseLocalDate(dateString);
+  const day = date.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const startDate = formatLocalDate(new Date(date.getFullYear(), date.getMonth(), date.getDate() + mondayOffset));
+  const endDate = addDays(startDate, excludeWeekends ? 4 : 6);
+
+  return { startDate, endDate };
+}
+
 function isWeekend(dateString) {
   const day = parseLocalDate(dateString).getDay();
   return day === 0 || day === 6;
@@ -277,12 +287,16 @@ export async function onRequestPost(context) {
 
   const costMode = payload.costMode || "total";
   const excludeWeekends = Boolean(payload.excludeWeekends);
-  const plannedDays = payload.endMode === "duration" ? Number(payload.plannedDays) : null;
+  const weekRange = costMode === "daily" ? getNaturalWeekRange(payload.startDate, excludeWeekends) : null;
+  const startDate = weekRange ? weekRange.startDate : payload.startDate;
+  const plannedDays = costMode === "daily" ? (excludeWeekends ? 5 : 7) : payload.endMode === "duration" ? Number(payload.plannedDays) : null;
   const endDate =
-    payload.endMode === "duration"
-      ? getEndDateFromUsageDays(payload.startDate, plannedDays, excludeWeekends)
-      : payload.endDate;
-  const usageDays = payload.startDate && endDate ? getUsageDays(payload.startDate, endDate, excludeWeekends) : 0;
+    costMode === "daily"
+      ? weekRange.endDate
+      : payload.endMode === "duration"
+        ? getEndDateFromUsageDays(startDate, plannedDays, excludeWeekends)
+        : payload.endDate;
+  const usageDays = startDate && endDate ? getUsageDays(startDate, endDate, excludeWeekends) : 0;
   const dailyCost = costMode === "daily" ? Number(payload.dailyCost) : null;
   const price = costMode === "daily" ? dailyCost * usageDays : Number(payload.price);
   const normalizedPayload = {
@@ -290,8 +304,10 @@ export async function onRequestPost(context) {
     costMode,
     price,
     dailyCost,
+    startDate,
     endDate,
-    plannedDays,
+    endMode: costMode === "daily" ? "duration" : payload.endMode,
+    plannedDays: costMode === "daily" ? usageDays : plannedDays,
     excludeWeekends,
     autoRenew: Boolean(payload.autoRenew),
   };
