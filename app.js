@@ -152,6 +152,15 @@ function getDailyCost(item) {
   return Number(item.price) / getUsageDays(item.startDate, item.endDate, item.excludeWeekends);
 }
 
+function getRemainingUsageDays(item, today = getTodayDateString()) {
+  if (isArchived(item, today)) {
+    return 0;
+  }
+
+  const remainingStartDate = item.startDate > today ? item.startDate : today;
+  return getUsageDays(remainingStartDate, item.endDate, item.excludeWeekends);
+}
+
 function formatCurrency(value) {
   return new Intl.NumberFormat("zh-CN", {
     style: "currency",
@@ -417,6 +426,13 @@ function renderRows() {
     const dayCount = document.createElement("span");
     dayCount.textContent = `${getUsageDays(item.startDate, item.endDate, item.excludeWeekends)} 天`;
     row.children[3].append(dayCount);
+
+    if (!archived) {
+      const remainingDays = document.createElement("span");
+      remainingDays.className = "meta-tag";
+      remainingDays.textContent = `预计剩余 ${getRemainingUsageDays(item, today)} 天`;
+      row.children[3].append(remainingDays);
+    }
 
     const tags = [];
 
