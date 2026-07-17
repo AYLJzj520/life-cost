@@ -100,6 +100,8 @@ function normalizeItem(row) {
     id: row.id,
     name: row.name,
     price: row.price,
+    costMode: row.costMode || "total",
+    dailyCost: row.dailyCost,
     startDate: row.startDate,
     endDate: row.endDate,
     endMode: row.endMode || "date",
@@ -111,6 +113,19 @@ function normalizeItem(row) {
   };
 }
 
+async function ensureDailyCostColumns(db) {
+  const { results } = await db.prepare("PRAGMA table_info(items)").all();
+  const columnNames = new Set(results.map((column) => column.name));
+
+  if (!columnNames.has("cost_mode")) {
+    await db.prepare("ALTER TABLE items ADD COLUMN cost_mode TEXT NOT NULL DEFAULT 'total'").run();
+  }
+
+  if (!columnNames.has("daily_cost")) {
+    await db.prepare("ALTER TABLE items ADD COLUMN daily_cost REAL").run();
+  }
+}
+
 function validateItem(item) {
   if (!item || typeof item !== "object") {
     return "请求数据格式不正确";
@@ -120,8 +135,16 @@ function validateItem(item) {
     return "请输入商品名称";
   }
 
-  if (!Number.isFinite(Number(item.price)) || Number(item.price) <= 0) {
+  if (item.costMode !== "total" && item.costMode !== "daily") {
+    return "请选择成本方式";
+  }
+
+  if (item.costMode === "total" && (!Number.isFinite(Number(item.price)) || Number(item.price) <= 0)) {
     return "请输入有效价格";
+  }
+
+  if (item.costMode === "daily" && (!Number.isFinite(Number(item.dailyCost)) || Number(item.dailyCost) <= 0)) {
+    return "请输入有效每日成本";
   }
 
   if (!isDateString(item.startDate)) {
@@ -158,6 +181,8 @@ async function listItems(db) {
         id,
         name,
         price,
+        cost_mode AS costMode,
+        daily_cost AS dailyCost,
         start_date AS startDate,
         end_date AS endDate,
         end_mode AS endMode,
@@ -191,6 +216,7 @@ async function renewExpiredItems(db, today) {
     const usageDays = item.plannedDays || getUsageDays(item.startDate, item.endDate, item.excludeWeekends);
     const startDate = addUsageDays(item.endDate, 1, item.excludeWeekends);
     const endDate = getEndDateFromUsageDays(startDate, usageDays, item.excludeWeekends);
+    const price = item.costMode === "daily" ? Number(item.dailyCost) * usageDays : item.price;
 
     await db
       .prepare(
@@ -198,6 +224,8 @@ async function renewExpiredItems(db, today) {
           id,
           name,
           price,
+          cost_mode,
+          daily_cost,
           start_date,
           end_date,
           end_mode,
@@ -207,12 +235,14 @@ async function renewExpiredItems(db, today) {
           renewed_from_id,
           created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         crypto.randomUUID(),
         item.name,
-        item.price,
+        price,
+        item.costMode,
+        item.dailyCost,
         startDate,
         endDate,
         item.endMode,
@@ -227,6 +257,7 @@ async function renewExpiredItems(db, today) {
 }
 
 export async function onRequestGet(context) {
+  await ensureDailyCostColumns(context.env.DB);
   const today = getTodayDateString();
   await renewExpiredItems(context.env.DB, today);
   const items = await listItems(context.env.DB);
@@ -235,6 +266,7 @@ export async function onRequestGet(context) {
 }
 
 export async function onRequestPost(context) {
+  await ensureDailyCostColumns(context.env.DB);
   let payload;
 
   try {
@@ -243,14 +275,21 @@ export async function onRequestPost(context) {
     return json({ error: "请求数据格式不正确" }, 400);
   }
 
+  const costMode = payload.costMode || "total";
   const excludeWeekends = Boolean(payload.excludeWeekends);
   const plannedDays = payload.endMode === "duration" ? Number(payload.plannedDays) : null;
   const endDate =
     payload.endMode === "duration"
       ? getEndDateFromUsageDays(payload.startDate, plannedDays, excludeWeekends)
       : payload.endDate;
+  const usageDays = payload.startDate && endDate ? getUsageDays(payload.startDate, endDate, excludeWeekends) : 0;
+  const dailyCost = costMode === "daily" ? Number(payload.dailyCost) : null;
+  const price = costMode === "daily" ? dailyCost * usageDays : Number(payload.price);
   const normalizedPayload = {
     ...payload,
+    costMode,
+    price,
+    dailyCost,
     endDate,
     plannedDays,
     excludeWeekends,
@@ -266,6 +305,8 @@ export async function onRequestPost(context) {
     id: crypto.randomUUID(),
     name: normalizedPayload.name.trim(),
     price: Number(normalizedPayload.price),
+    costMode: normalizedPayload.costMode,
+    dailyCost: normalizedPayload.dailyCost,
     startDate: normalizedPayload.startDate,
     endDate: normalizedPayload.endDate,
     endMode: normalizedPayload.endMode,
@@ -281,6 +322,8 @@ export async function onRequestPost(context) {
       id,
       name,
       price,
+      cost_mode,
+      daily_cost,
       start_date,
       end_date,
       end_mode,
@@ -290,12 +333,14 @@ export async function onRequestPost(context) {
       renewed_from_id,
       created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       item.id,
       item.name,
       item.price,
+      item.costMode,
+      item.dailyCost,
       item.startDate,
       item.endDate,
       item.endMode,

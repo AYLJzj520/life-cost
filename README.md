@@ -78,4 +78,12 @@ npx wrangler d1 execute life-cost-db --remote --file=./migrations/20260717_add_u
 
 这次升级会为商品增加结束方式、预计天数、不包含周末、自动续期和续期来源字段。
 
+每日固定成本模式需要执行：
+
+```sh
+npx wrangler d1 execute life-cost-db --remote --file=./migrations/20260717_add_daily_cost_mode.sql
+```
+
+如果忘记执行该迁移，Pages Functions 会在读取、新增或编辑商品时自动补齐 `cost_mode` 和 `daily_cost` 字段。
+
 如果需要自定义域名，可以在 Pages 项目的 `Custom domains` 中添加域名，并按 Cloudflare 提示完成 DNS 配置。

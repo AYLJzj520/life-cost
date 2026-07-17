@@ -16,6 +16,8 @@ function normalizeItem(row) {
     id: row.id,
     name: row.name,
     price: row.price,
+    costMode: row.costMode || "total",
+    dailyCost: row.dailyCost,
     startDate: row.startDate,
     endDate: row.endDate,
     endMode: row.endMode || "date",
@@ -72,6 +74,8 @@ async function getItem(db, id) {
         id,
         name,
         price,
+        cost_mode AS costMode,
+        daily_cost AS dailyCost,
         start_date AS startDate,
         end_date AS endDate,
         end_mode AS endMode,
@@ -89,7 +93,21 @@ async function getItem(db, id) {
   return item ? normalizeItem(item) : null;
 }
 
+async function ensureDailyCostColumns(db) {
+  const { results } = await db.prepare("PRAGMA table_info(items)").all();
+  const columnNames = new Set(results.map((column) => column.name));
+
+  if (!columnNames.has("cost_mode")) {
+    await db.prepare("ALTER TABLE items ADD COLUMN cost_mode TEXT NOT NULL DEFAULT 'total'").run();
+  }
+
+  if (!columnNames.has("daily_cost")) {
+    await db.prepare("ALTER TABLE items ADD COLUMN daily_cost REAL").run();
+  }
+}
+
 export async function onRequestPatch(context) {
+  await ensureDailyCostColumns(context.env.DB);
   const id = context.params.id;
 
   if (!id) {
@@ -147,13 +165,22 @@ export async function onRequestPatch(context) {
     return json({ error: "使用区间至少需要包含 1 天" }, 400);
   }
 
-  await context.env.DB.prepare("UPDATE items SET end_date = ?, planned_days = ?, auto_renew = ? WHERE id = ?")
-    .bind(payload.endDate, plannedDays, "autoRenew" in updates ? (updates.autoRenew ? 1 : 0) : (item.autoRenew ? 1 : 0), id)
+  const price = item.costMode === "daily" ? Number(item.dailyCost) * plannedDays : item.price;
+
+  await context.env.DB.prepare("UPDATE items SET end_date = ?, planned_days = ?, price = ?, auto_renew = ? WHERE id = ?")
+    .bind(
+      payload.endDate,
+      plannedDays,
+      price,
+      "autoRenew" in updates ? (updates.autoRenew ? 1 : 0) : (item.autoRenew ? 1 : 0),
+      id,
+    )
     .run();
 
   return json({
     item: {
       ...item,
+      price,
       endDate: payload.endDate,
       plannedDays,
       autoRenew: "autoRenew" in updates ? updates.autoRenew : item.autoRenew,

@@ -7,7 +7,11 @@ const state = {
 const elements = {
   form: document.querySelector("#itemForm"),
   nameInput: document.querySelector("#nameInput"),
+  costModeInputs: document.querySelectorAll("input[name='costMode']"),
+  priceField: document.querySelector("#priceField"),
   priceInput: document.querySelector("#priceInput"),
+  dailyCostField: document.querySelector("#dailyCostField"),
+  dailyCostInput: document.querySelector("#dailyCostInput"),
   startDateInput: document.querySelector("#startDateInput"),
   endDateField: document.querySelector("#endDateField"),
   endDateInput: document.querySelector("#endDateInput"),
@@ -130,6 +134,10 @@ function isArchived(item, today = getTodayDateString()) {
 }
 
 function getDailyCost(item) {
+  if (item.costMode === "daily") {
+    return Number(item.dailyCost);
+  }
+
   return Number(item.price) / getUsageDays(item.startDate, item.endDate, item.excludeWeekends);
 }
 
@@ -149,17 +157,26 @@ function getEndMode() {
   return document.querySelector("input[name='endMode']:checked").value;
 }
 
+function getCostMode() {
+  return document.querySelector("input[name='costMode']:checked").value;
+}
+
 function createItem(formData) {
+  const costMode = formData.get("costMode");
   const endMode = formData.get("endMode");
   const excludeWeekends = formData.get("excludeWeekends") === "on";
   const plannedDays = Number(formData.get("plannedDays"));
   const startDate = formData.get("startDate");
   const endDate =
     endMode === "duration" ? getEndDateFromUsageDays(startDate, plannedDays, excludeWeekends) : formData.get("endDate");
+  const usageDays = startDate && endDate ? getUsageDays(startDate, endDate, excludeWeekends) : 0;
+  const dailyCost = Number(formData.get("dailyCost"));
 
   return {
     name: formData.get("name").trim(),
-    price: Number(formData.get("price")),
+    price: costMode === "daily" ? dailyCost * usageDays : Number(formData.get("price")),
+    dailyCost: costMode === "daily" ? dailyCost : null,
+    costMode,
     startDate,
     endDate,
     endMode,
@@ -174,8 +191,16 @@ function validateItem(item) {
     return "请输入商品名称";
   }
 
-  if (!Number.isFinite(item.price) || item.price <= 0) {
+  if (item.costMode !== "total" && item.costMode !== "daily") {
+    return "请选择成本方式";
+  }
+
+  if (item.costMode === "total" && (!Number.isFinite(item.price) || item.price <= 0)) {
     return "请输入有效价格";
+  }
+
+  if (item.costMode === "daily" && (!Number.isFinite(item.dailyCost) || item.dailyCost <= 0)) {
+    return "请输入有效每日成本";
   }
 
   if (!item.startDate) {
@@ -199,6 +224,15 @@ function validateItem(item) {
   }
 
   return "";
+}
+
+function syncCostModeFields() {
+  const costMode = getCostMode();
+
+  elements.priceField.classList.toggle("is-hidden", costMode !== "total");
+  elements.priceInput.required = costMode === "total";
+  elements.dailyCostField.classList.toggle("is-visible", costMode === "daily");
+  elements.dailyCostInput.required = costMode === "daily";
 }
 
 function syncEndModeFields() {
@@ -370,6 +404,10 @@ function renderRows() {
       tags.push("续期");
     }
 
+    if (item.costMode === "daily") {
+      tags.push("每日固定");
+    }
+
     tags.forEach((tag) => {
       const tagElement = document.createElement("span");
       tagElement.className = "meta-tag";
@@ -450,6 +488,7 @@ async function handleSubmit(event) {
     state.items.unshift(data.item);
     elements.form.reset();
     elements.startDateInput.value = getTodayDateString();
+    syncCostModeFields();
     syncEndModeFields();
     render();
   } catch (requestError) {
@@ -466,9 +505,11 @@ elements.editDialog.addEventListener("click", (event) => {
   }
 });
 elements.endModeInputs.forEach((input) => input.addEventListener("change", syncEndModeFields));
+elements.costModeInputs.forEach((input) => input.addEventListener("change", syncCostModeFields));
 elements.activeTab.addEventListener("click", () => setView("active"));
 elements.archivedTab.addEventListener("click", () => setView("archived"));
 elements.startDateInput.value = getTodayDateString();
+syncCostModeFields();
 syncEndModeFields();
 render();
 loadItems();

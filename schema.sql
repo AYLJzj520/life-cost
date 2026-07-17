@@ -2,6 +2,8 @@ CREATE TABLE IF NOT EXISTS items (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   price REAL NOT NULL CHECK (price > 0),
+  cost_mode TEXT NOT NULL DEFAULT 'total' CHECK (cost_mode IN ('total', 'daily')),
+  daily_cost REAL,
   start_date TEXT NOT NULL,
   end_date TEXT NOT NULL,
   end_mode TEXT NOT NULL DEFAULT 'date' CHECK (end_mode IN ('date', 'duration')),

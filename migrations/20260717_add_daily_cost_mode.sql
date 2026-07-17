@@ -1,0 +1,2 @@
+ALTER TABLE items ADD COLUMN cost_mode TEXT NOT NULL DEFAULT 'total';
+ALTER TABLE items ADD COLUMN daily_cost REAL;
