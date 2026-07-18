@@ -454,7 +454,16 @@ function renderRows() {
   const today = getTodayDateString();
   const visibleItems = state.items
     .filter((item) => (state.view === "archived" ? isArchived(item, today) : !isArchived(item, today)))
-    .sort((a, b) => a.endDate.localeCompare(b.endDate));
+    .sort((a, b) => {
+      if (state.view === "active") {
+        const remainingDaysDifference = getRemainingUsageDays(a, today) - getRemainingUsageDays(b, today);
+        if (remainingDaysDifference !== 0) {
+          return remainingDaysDifference;
+        }
+      }
+
+      return a.endDate.localeCompare(b.endDate);
+    });
 
   elements.itemRows.innerHTML = "";
   elements.emptyState.classList.toggle("is-visible", visibleItems.length === 0);
