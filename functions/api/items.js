@@ -12,6 +12,7 @@ import {
   getNaturalWeekRange,
   getTodayDateString,
   getUsageDays,
+  isIncludedDate,
   isAllowedDateString,
 } from "../../date-utils.js";
 import { createRenewalItem } from "../../renewal-utils.js";
@@ -236,11 +237,23 @@ function getDailyCost(item) {
   return Number(item.price) / getUsageDays(item.startDate, item.endDate, item.excludeWeekends);
 }
 
-function getSummary(activeItems, archivedCount) {
+function isChargedOnDate(item, date) {
+  return item.startDate <= date
+    && item.endDate >= date
+    && isIncludedDate(date, item.excludeWeekends);
+}
+
+export function getTodayCost(items, today) {
+  return items.reduce((sum, item) => (
+    isChargedOnDate(item, today) ? sum + getDailyCost(item) : sum
+  ), 0);
+}
+
+function getSummary(activeItems, archivedCount, today) {
   return {
     activeCount: activeItems.length,
     archivedCount,
-    activeDailyCost: activeItems.reduce((sum, item) => sum + getDailyCost(item), 0),
+    activeDailyCost: getTodayCost(activeItems, today),
   };
 }
 
@@ -426,7 +439,7 @@ export async function onRequestGet(context) {
       const archivedCount = await getArchivedCount(context.env.DB, today);
       return json({
         items: activeItems,
-        summary: getSummary(activeItems, archivedCount),
+        summary: getSummary(activeItems, archivedCount, today),
         pagination: null,
       });
     }
@@ -434,7 +447,7 @@ export async function onRequestGet(context) {
     const archivedResult = await listArchivedItems(context.env.DB, today, page);
     return json({
       items: archivedResult.items,
-      summary: getSummary(activeItems, archivedResult.archivedCount),
+      summary: getSummary(activeItems, archivedResult.archivedCount, today),
       pagination: archivedResult.pagination,
     });
   } catch (error) {

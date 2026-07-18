@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  getTodayCost,
   onRequestGet,
   renewExpiredItems,
 } from "../functions/api/items.js";
@@ -328,6 +329,54 @@ test("独立续期接口执行写入并返回批次进度", async () => {
   assert.ok(result.renewalCount > 0);
   assert.equal(result.hasMore, false);
   assert.ok(db.items.some((item) => item.renewedFromId === "renew-endpoint-source"));
+});
+
+test("今日生活成本只统计当天实际产生费用的商品", () => {
+  const saturday = "2026-07-18";
+  const items = [
+    createItem({
+      id: "included-total",
+      price: 70,
+      costMode: "total",
+      dailyCost: null,
+      startDate: "2026-07-13",
+      endDate: "2026-07-19",
+      plannedDays: 7,
+      excludeWeekends: false,
+    }),
+    createItem({
+      id: "excluded-weekend",
+      price: 50,
+      costMode: "total",
+      dailyCost: null,
+      startDate: "2026-07-13",
+      endDate: "2026-07-19",
+      plannedDays: 5,
+      excludeWeekends: true,
+    }),
+    createItem({
+      id: "included-daily",
+      price: 56,
+      costMode: "daily",
+      dailyCost: 8,
+      startDate: "2026-07-13",
+      endDate: "2026-07-19",
+      plannedDays: 7,
+      excludeWeekends: false,
+    }),
+    createItem({
+      id: "future-item",
+      price: 30,
+      costMode: "total",
+      dailyCost: null,
+      startDate: "2026-07-19",
+      endDate: "2026-07-21",
+      plannedDays: 3,
+      excludeWeekends: false,
+    }),
+  ];
+
+  assert.equal(getTodayCost(items, saturday), 18);
 });
 
 test("已归档列表按 50 条分页并返回完整汇总", async () => {

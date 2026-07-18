@@ -68,7 +68,7 @@ npx wrangler d1 execute life-cost-db --remote --file=./schema.sql
 
 ## 商品读取、续期与归档分页
 
-- `GET /api/items?view=active` 只读取使用中商品和汇总数据，不执行数据库写入。
+- `GET /api/items?view=active` 只读取使用中商品和汇总数据，不执行数据库写入；汇总中的今日生活成本只统计当天实际产生费用的商品，若当天为周末，勾选“不包含周末”的商品不会计入。
 - `POST /api/items/renew` 单次最多生成 40 条续期记录，并返回 `hasMore`；前端会按批次继续请求，直到所有积压周期补齐。
 - 同一批次按商品轮转生成续期，避免单个长期积压商品独占全部写入额度。
 - `GET /api/items?view=archived&page=1` 按每页 50 条返回已归档商品，同时返回总页数和总条数。
