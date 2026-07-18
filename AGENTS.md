@@ -7,10 +7,14 @@
 - `index.html`：页面结构与表单、汇总区、商品列表。
 - `styles.css`：响应式界面样式。
 - `app.js`：前端表单校验、日均成本计算、使用中/已归档切换，并通过 `/api/items` 读写数据。
+- `date-utils.js`：前端与 Pages Functions 共用的无时区日期计算、工作日计算和日期范围校验。
+- `renewal-utils.js`：自动续期记录的纯计算逻辑。
+- `api-utils.js`：Pages Functions 共用的 JSON 请求体限制、错误响应和严格布尔值读取。
 - `functions/api/items.js`：Pages Function API，负责从 D1 列表读取和新增商品。
 - `functions/api/items/[id].js`：Pages Function API，负责按 ID 更新结束日期、更新自动续期开关和删除商品。
 - `schema.sql`：Cloudflare D1 数据库表结构。
 - `migrations/`：线上 D1 已存在表结构的增量迁移 SQL。
+- `tests/`：使用 Node 内置测试运行器验证日期、工作日、自然周、续期和 API 规范化逻辑。
 - `package.json`：提供 Cloudflare Pages 可执行的 `npm run build` 构建命令。
 - `.gitignore`：忽略本地和 Cloudflare 构建生成的 `dist/` 目录。
 - `README.md`：说明本地验证方式与 Cloudflare Pages 自动部署配置。
@@ -21,12 +25,17 @@
 - 使用中的商品支持通过 `+1天` / `-1天` 调整结束日期，并基于新天数重新计算日均成本；结束日期不能早于使用日期。
 - 新增商品支持总价分摊或每日固定成本；总价分摊支持按结束日期或预计使用天数设置周期；每日固定成本按使用日期所在自然周自动设置周期，勾选不包含周末时为周一至周五，否则为周一至周日；勾选自动续期后，到期归档并生成下一周期的同名商品。
 - 已生成商品支持通过编辑弹窗修改到期后是否自动续期。
-- 每日固定成本模式使用 `cost_mode` 和 `daily_cost` 字段；对应迁移文件为 `migrations/20260717_add_daily_cost_mode.sql`，API 会自动补齐缺失字段以降低线上迁移窗口风险。
+- 每日固定成本模式使用 `cost_mode` 和 `daily_cost` 字段；对应迁移文件为 `migrations/20260717_add_daily_cost_mode.sql`，部署前必须完成数据库迁移，API 请求期间不修改表结构。
+- 自动续期会在一次读取中补齐遗漏的多个周期，并通过 `renewed_from_id` 唯一索引与条件插入避免并发重复；对应迁移文件为 `migrations/20260718_add_unique_renewal_index.sql`。
+- 日期计算统一使用 UTC 日序号，业务上的“今天”固定按 `Asia/Shanghai` 时区确定，避免浏览器夏令时造成天数误差。
+- API 限制 JSON 请求体、名称长度、金额、真实日期范围和日期跨度，并严格要求布尔字段使用 JSON 布尔值。
+- 新增、编辑、日期调整和删除操作具备重复提交防护；删除前需要用户确认，编辑弹窗和列表标签页提供键盘与 ARIA 支持。
 
 ## 维护约定
 
 - 保持无构建依赖的静态前端实现，除非用户明确要求引入框架或后端。
 - 修改计算逻辑时优先保持函数小而可验证：`getInclusiveDays`、`isArchived`、`getDailyCost`。
+- 日期与续期计算优先复用 `date-utils.js` 和 `renewal-utils.js`，不要在前端或 Pages Functions 中复制实现。
 - 修改数据结构时同步更新 `schema.sql`、Pages Functions 和 `README.md` 的部署说明。
 - 修改已上线数据库字段时新增 `migrations/` 迁移文件，并在部署前后确认线上 D1 已执行迁移。
 - Cloudflare Pages 部署使用 `npm run build`，输出目录为 `dist`；保持构建脚本只复制实际发布所需的静态文件。
@@ -35,4 +44,4 @@
 - `dist/` 是构建产物，不提交到仓库。
 - 只做和用户需求直接相关的改动，不进行无关重构、批量格式化、重命名或清理。
 - 禁止批量删除文件或目录；需要删除文件时只能一次删除一个明确路径的文件。
-- 每次改动后运行最相关验证，例如 `node --check app.js` 和 `npm run build`，并按需要补充本文件中的项目说明。
+- 每次改动后运行最相关验证，例如 `node --check app.js`、`npm test` 和 `npm run build`，并按需要补充本文件中的项目说明。

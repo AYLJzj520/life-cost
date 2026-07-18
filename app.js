@@ -1,7 +1,22 @@
+import {
+  MAX_DATE_SPAN_DAYS,
+  addUsageDays,
+  getEndDateFromUsageDays,
+  getInclusiveDays,
+  getNaturalWeekRange,
+  getTodayDateString,
+  getUsageDays,
+  isAllowedDateString,
+} from "./date-utils.js";
+
 const state = {
   items: [],
   view: "active",
   editingItemId: "",
+  dialogTrigger: null,
+  isSubmitting: false,
+  isEditing: false,
+  pendingItemIds: new Set(),
 };
 
 const elements = {
@@ -21,6 +36,7 @@ const elements = {
   plannedDaysInput: document.querySelector("#plannedDaysInput"),
   excludeWeekendsInput: document.querySelector("#excludeWeekendsInput"),
   autoRenewInput: document.querySelector("#autoRenewInput"),
+  submitButton: document.querySelector("#submitButton"),
   formError: document.querySelector("#formError"),
   todayText: document.querySelector("#todayText"),
   activeDailyCost: document.querySelector("#activeDailyCost"),
@@ -35,110 +51,9 @@ const elements = {
   editItemName: document.querySelector("#editItemName"),
   editAutoRenewInput: document.querySelector("#editAutoRenewInput"),
   editCancelButton: document.querySelector("#editCancelButton"),
+  editSubmitButton: document.querySelector("#editSubmitButton"),
   editError: document.querySelector("#editError"),
 };
-
-function getTodayDateString() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function parseLocalDate(dateString) {
-  const [year, month, day] = dateString.split("-").map(Number);
-  return new Date(year, month - 1, day);
-}
-
-function formatLocalDate(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function addDays(dateString, dayDelta) {
-  const date = parseLocalDate(dateString);
-  date.setDate(date.getDate() + dayDelta);
-  return formatLocalDate(date);
-}
-
-function getNaturalWeekRange(dateString, excludeWeekends) {
-  const date = parseLocalDate(dateString);
-  const day = date.getDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  const startDate = formatLocalDate(new Date(date.getFullYear(), date.getMonth(), date.getDate() + mondayOffset));
-  const endDate = addDays(startDate, excludeWeekends ? 4 : 6);
-
-  return { startDate, endDate };
-}
-
-function isWeekend(date) {
-  const day = date.getDay();
-  return day === 0 || day === 6;
-}
-
-function isIncludedDate(dateString, excludeWeekends) {
-  return !excludeWeekends || !isWeekend(parseLocalDate(dateString));
-}
-
-function addUsageDays(dateString, dayDelta, excludeWeekends) {
-  let nextDate = dateString;
-  let remainingDays = Math.abs(dayDelta);
-  const step = dayDelta >= 0 ? 1 : -1;
-
-  while (remainingDays > 0) {
-    nextDate = addDays(nextDate, step);
-
-    if (isIncludedDate(nextDate, excludeWeekends)) {
-      remainingDays -= 1;
-    }
-  }
-
-  return nextDate;
-}
-
-function getUsageDays(startDate, endDate, excludeWeekends = false) {
-  if (!excludeWeekends) {
-    return getInclusiveDays(startDate, endDate);
-  }
-
-  let days = 0;
-  let currentDate = startDate;
-
-  while (currentDate <= endDate) {
-    if (isIncludedDate(currentDate, true)) {
-      days += 1;
-    }
-
-    currentDate = addDays(currentDate, 1);
-  }
-
-  return days;
-}
-
-function getEndDateFromUsageDays(startDate, plannedDays, excludeWeekends) {
-  let endDate = startDate;
-  let countedDays = isIncludedDate(startDate, excludeWeekends) ? 1 : 0;
-
-  while (countedDays < plannedDays) {
-    endDate = addDays(endDate, 1);
-
-    if (isIncludedDate(endDate, excludeWeekends)) {
-      countedDays += 1;
-    }
-  }
-
-  return endDate;
-}
-
-function getInclusiveDays(startDate, endDate) {
-  const start = parseLocalDate(startDate);
-  const end = parseLocalDate(endDate);
-  const dayMs = 24 * 60 * 60 * 1000;
-  return Math.floor((end - start) / dayMs) + 1;
-}
 
 function isArchived(item, today = getTodayDateString()) {
   return item.endDate < today;
@@ -187,15 +102,22 @@ function createItem(formData) {
   const excludeWeekends = formData.get("excludeWeekends") === "on";
   const plannedDays = Number(formData.get("plannedDays"));
   let startDate = formData.get("startDate");
-  const weekRange = costMode === "daily" ? getNaturalWeekRange(startDate, excludeWeekends) : null;
-  const endDate =
-    weekRange
-      ? weekRange.endDate
-      : endMode === "duration"
-        ? getEndDateFromUsageDays(startDate, plannedDays, excludeWeekends)
-        : formData.get("endDate");
+  const canCalculateDuration = isAllowedDateString(startDate)
+    && Number.isInteger(plannedDays)
+    && plannedDays > 0
+    && plannedDays <= MAX_DATE_SPAN_DAYS;
+  const weekRange = costMode === "daily" && isAllowedDateString(startDate)
+    ? getNaturalWeekRange(startDate, excludeWeekends)
+    : null;
+  const endDate = weekRange
+    ? weekRange.endDate
+    : endMode === "duration" && canCalculateDuration
+      ? getEndDateFromUsageDays(startDate, plannedDays, excludeWeekends)
+      : formData.get("endDate");
   startDate = weekRange ? weekRange.startDate : startDate;
-  const usageDays = startDate && endDate ? getUsageDays(startDate, endDate, excludeWeekends) : 0;
+  const usageDays = isAllowedDateString(startDate) && isAllowedDateString(endDate)
+    ? getUsageDays(startDate, endDate, excludeWeekends)
+    : 0;
   const dailyCost = Number(formData.get("dailyCost"));
 
   return {
@@ -217,6 +139,10 @@ function validateItem(item) {
     return "请输入商品名称";
   }
 
+  if (item.name.length > 100) {
+    return "商品名称不能超过 100 个字符";
+  }
+
   if (item.costMode !== "total" && item.costMode !== "daily") {
     return "请选择成本方式";
   }
@@ -229,20 +155,27 @@ function validateItem(item) {
     return "请输入有效每日成本";
   }
 
-  if (!item.startDate) {
-    return "请选择使用日期";
+  if (!isAllowedDateString(item.startDate)) {
+    return "请选择有效使用日期";
   }
 
-  if (item.endMode === "duration" && (!Number.isInteger(item.plannedDays) || item.plannedDays <= 0)) {
+  if (
+    item.endMode === "duration" &&
+    (!Number.isInteger(item.plannedDays) || item.plannedDays <= 0 || item.plannedDays > MAX_DATE_SPAN_DAYS)
+  ) {
     return "请输入有效预计使用天数";
   }
 
-  if (item.endMode === "date" && !item.endDate) {
-    return "请选择结束日期";
+  if (!isAllowedDateString(item.endDate)) {
+    return "请选择有效结束日期";
   }
 
   if (item.endDate < item.startDate) {
     return "结束日期不能早于使用日期";
+  }
+
+  if (getInclusiveDays(item.startDate, item.endDate) > MAX_DATE_SPAN_DAYS) {
+    return `使用日期跨度不能超过 ${MAX_DATE_SPAN_DAYS} 天`;
   }
 
   if (getUsageDays(item.startDate, item.endDate, item.excludeWeekends) <= 0) {
@@ -279,8 +212,13 @@ function syncEndModeFields() {
 
 function setView(view) {
   state.view = view;
-  elements.activeTab.classList.toggle("is-active", view === "active");
-  elements.archivedTab.classList.toggle("is-active", view === "archived");
+  const isActiveView = view === "active";
+  elements.activeTab.classList.toggle("is-active", isActiveView);
+  elements.archivedTab.classList.toggle("is-active", !isActiveView);
+  elements.activeTab.setAttribute("aria-selected", String(isActiveView));
+  elements.archivedTab.setAttribute("aria-selected", String(!isActiveView));
+  elements.activeTab.tabIndex = isActiveView ? 0 : -1;
+  elements.archivedTab.tabIndex = isActiveView ? -1 : 0;
   render();
 }
 
@@ -306,25 +244,48 @@ async function loadItems() {
   }
 }
 
-async function deleteItem(id) {
+async function deleteItem(item) {
+  if (state.pendingItemIds.has(item.id)) {
+    return;
+  }
+
+  const confirmed = window.confirm(`确定永久删除“${item.name}”吗？此操作无法恢复。`);
+  if (!confirmed) {
+    return;
+  }
+
+  state.pendingItemIds.add(item.id);
+  elements.formError.textContent = "";
+  render();
+
   try {
-    await fetchJson(`/api/items/${encodeURIComponent(id)}`, {
+    await fetchJson(`/api/items/${encodeURIComponent(item.id)}`, {
       method: "DELETE",
     });
-    state.items = state.items.filter((item) => item.id !== id);
-    render();
+    state.items = state.items.filter((currentItem) => currentItem.id !== item.id);
   } catch (error) {
     elements.formError.textContent = error.message;
+  } finally {
+    state.pendingItemIds.delete(item.id);
+    render();
   }
 }
 
 async function updateEndDate(item, dayDelta) {
+  if (state.pendingItemIds.has(item.id)) {
+    return;
+  }
+
   const nextEndDate = addUsageDays(item.endDate, dayDelta, item.excludeWeekends);
 
   if (nextEndDate < item.startDate) {
     elements.formError.textContent = "结束日期不能早于使用日期";
     return;
   }
+
+  state.pendingItemIds.add(item.id);
+  elements.formError.textContent = "";
+  render();
 
   try {
     const data = await fetchJson(`/api/items/${encodeURIComponent(item.id)}`, {
@@ -337,34 +298,121 @@ async function updateEndDate(item, dayDelta) {
 
     state.items = state.items.map((currentItem) => (currentItem.id === item.id ? data.item : currentItem));
     elements.formError.textContent = "";
-    render();
   } catch (error) {
     elements.formError.textContent = error.message;
+  } finally {
+    state.pendingItemIds.delete(item.id);
+    render();
   }
 }
 
 function openEditDialog(item) {
+  if (state.pendingItemIds.has(item.id)) {
+    return;
+  }
+
   state.editingItemId = item.id;
+  state.dialogTrigger = document.activeElement;
   elements.editItemName.textContent = item.name;
   elements.editAutoRenewInput.checked = item.autoRenew;
   elements.editError.textContent = "";
   elements.editDialog.hidden = false;
+  elements.editAutoRenewInput.focus();
 }
 
 function closeEditDialog() {
+  if (state.isEditing) {
+    return;
+  }
+
+  const trigger = state.dialogTrigger;
+  const editingItemId = state.editingItemId;
   state.editingItemId = "";
+  state.dialogTrigger = null;
   elements.editForm.reset();
   elements.editDialog.hidden = true;
+  requestAnimationFrame(() => {
+    const nextTrigger = document.querySelector(`[data-edit-item-id="${CSS.escape(editingItemId)}"]`);
+    if (trigger instanceof HTMLElement && trigger.isConnected) {
+      trigger.focus();
+    } else if (nextTrigger instanceof HTMLElement) {
+      nextTrigger.focus();
+    }
+  });
+}
+
+function handleDialogKeydown(event) {
+  if (elements.editDialog.hidden) {
+    return;
+  }
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeEditDialog();
+    return;
+  }
+
+  if (event.key !== "Tab") {
+    return;
+  }
+
+  const focusableElements = [...elements.editDialog.querySelectorAll("button:not(:disabled), input:not(:disabled)")];
+  if (focusableElements.length === 0) {
+    event.preventDefault();
+    return;
+  }
+
+  const firstElement = focusableElements[0];
+  const lastElement = focusableElements.at(-1);
+  if (event.shiftKey && document.activeElement === firstElement) {
+    event.preventDefault();
+    lastElement.focus();
+  } else if (!event.shiftKey && document.activeElement === lastElement) {
+    event.preventDefault();
+    firstElement.focus();
+  }
+}
+
+function handleTabKeydown(event) {
+  const tabs = [elements.activeTab, elements.archivedTab];
+  const currentIndex = tabs.indexOf(event.currentTarget);
+  let nextIndex = currentIndex;
+
+  if (event.key === "ArrowRight") {
+    nextIndex = (currentIndex + 1) % tabs.length;
+  } else if (event.key === "ArrowLeft") {
+    nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+  } else if (event.key === "Home") {
+    nextIndex = 0;
+  } else if (event.key === "End") {
+    nextIndex = tabs.length - 1;
+  } else {
+    return;
+  }
+
+  event.preventDefault();
+  tabs[nextIndex].click();
+  tabs[nextIndex].focus();
 }
 
 async function handleEditSubmit(event) {
   event.preventDefault();
+  if (state.isEditing) {
+    return;
+  }
+
   const item = state.items.find((currentItem) => currentItem.id === state.editingItemId);
 
   if (!item) {
     closeEditDialog();
     return;
   }
+
+  state.isEditing = true;
+  elements.editForm.setAttribute("aria-busy", "true");
+  elements.editAutoRenewInput.disabled = true;
+  elements.editCancelButton.disabled = true;
+  elements.editSubmitButton.disabled = true;
 
   try {
     const data = await fetchJson(`/api/items/${encodeURIComponent(item.id)}`, {
@@ -376,10 +424,17 @@ async function handleEditSubmit(event) {
     });
 
     state.items = state.items.map((currentItem) => (currentItem.id === item.id ? data.item : currentItem));
+    state.isEditing = false;
     closeEditDialog();
-    render();
   } catch (error) {
     elements.editError.textContent = error.message;
+  } finally {
+    state.isEditing = false;
+    elements.editForm.removeAttribute("aria-busy");
+    elements.editAutoRenewInput.disabled = false;
+    elements.editCancelButton.disabled = false;
+    elements.editSubmitButton.disabled = false;
+    render();
   }
 }
 
@@ -406,8 +461,10 @@ function renderRows() {
 
   visibleItems.forEach((item) => {
     const archived = isArchived(item, today);
+    const isPending = state.pendingItemIds.has(item.id);
     const row = document.createElement("tr");
     row.className = archived ? "archived-row" : "";
+    row.setAttribute("aria-busy", String(isPending));
 
     row.innerHTML = `
       <td class="name-cell"></td>
@@ -460,6 +517,8 @@ function renderRows() {
     editButton.type = "button";
     editButton.textContent = "编辑";
     editButton.title = "编辑自动续期";
+    editButton.disabled = isPending;
+    editButton.dataset.editItemId = item.id;
     editButton.addEventListener("click", () => openEditDialog(item));
     actions.append(editButton);
 
@@ -468,7 +527,7 @@ function renderRows() {
       subtractButton.className = "day-button";
       subtractButton.type = "button";
       subtractButton.textContent = "-1天";
-      subtractButton.disabled = item.endDate <= item.startDate;
+      subtractButton.disabled = isPending || addUsageDays(item.endDate, -1, item.excludeWeekends) < item.startDate;
       subtractButton.title = "结束日期减少 1 天";
       subtractButton.addEventListener("click", () => updateEndDate(item, -1));
       actions.append(subtractButton);
@@ -478,6 +537,7 @@ function renderRows() {
       addButton.type = "button";
       addButton.textContent = "+1天";
       addButton.title = "结束日期增加 1 天";
+      addButton.disabled = isPending;
       addButton.addEventListener("click", () => updateEndDate(item, 1));
       actions.append(addButton);
     }
@@ -488,7 +548,8 @@ function renderRows() {
     deleteButton.title = "删除";
     deleteButton.setAttribute("aria-label", "删除");
     deleteButton.textContent = "×";
-    deleteButton.addEventListener("click", () => deleteItem(item.id));
+    deleteButton.disabled = isPending;
+    deleteButton.addEventListener("click", () => deleteItem(item));
     actions.append(deleteButton);
 
     elements.itemRows.append(row);
@@ -502,6 +563,10 @@ function render() {
 
 async function handleSubmit(event) {
   event.preventDefault();
+  if (state.isSubmitting) {
+    return;
+  }
+
   const item = createItem(new FormData(elements.form));
   const error = validateItem(item);
 
@@ -511,6 +576,10 @@ async function handleSubmit(event) {
   }
 
   elements.formError.textContent = "";
+  state.isSubmitting = true;
+  elements.form.setAttribute("aria-busy", "true");
+  elements.submitButton.disabled = true;
+  elements.submitButton.textContent = "添加中…";
 
   try {
     const data = await fetchJson("/api/items", {
@@ -529,6 +598,11 @@ async function handleSubmit(event) {
     render();
   } catch (requestError) {
     elements.formError.textContent = requestError.message;
+  } finally {
+    state.isSubmitting = false;
+    elements.form.removeAttribute("aria-busy");
+    elements.submitButton.disabled = false;
+    elements.submitButton.textContent = "添加商品";
   }
 }
 
@@ -536,16 +610,19 @@ elements.form.addEventListener("submit", handleSubmit);
 elements.editForm.addEventListener("submit", handleEditSubmit);
 elements.editCancelButton.addEventListener("click", closeEditDialog);
 elements.editDialog.addEventListener("click", (event) => {
-  if (event.target === elements.editDialog) {
+  if (event.target === elements.editDialog && !state.isEditing) {
     closeEditDialog();
   }
 });
+document.addEventListener("keydown", handleDialogKeydown);
 elements.endModeInputs.forEach((input) => input.addEventListener("change", syncEndModeFields));
 elements.costModeInputs.forEach((input) => input.addEventListener("change", syncCostModeFields));
 elements.activeTab.addEventListener("click", () => setView("active"));
 elements.archivedTab.addEventListener("click", () => setView("archived"));
+elements.activeTab.addEventListener("keydown", handleTabKeydown);
+elements.archivedTab.addEventListener("keydown", handleTabKeydown);
 elements.startDateInput.value = getTodayDateString();
+setView("active");
 syncCostModeFields();
 syncEndModeFields();
-render();
 loadItems();

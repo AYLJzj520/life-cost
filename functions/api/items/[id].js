@@ -1,15 +1,18 @@
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-    },
-  });
-}
+import {
+  RequestError,
+  getBooleanField,
+  handleRequestError,
+  json,
+  readJsonObject,
+} from "../../../api-utils.js";
+import {
+  MAX_DATE_SPAN_DAYS,
+  getInclusiveDays,
+  getUsageDays,
+  isAllowedDateString,
+} from "../../../date-utils.js";
 
-function isDateString(value) {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
-}
+const MAX_AMOUNT = 1_000_000_000;
 
 function normalizeItem(row) {
   return {
@@ -27,44 +30,6 @@ function normalizeItem(row) {
     renewedFromId: row.renewedFromId,
     createdAt: row.createdAt,
   };
-}
-
-function parseLocalDate(dateString) {
-  const [year, month, day] = dateString.split("-").map(Number);
-  return new Date(year, month - 1, day);
-}
-
-function formatLocalDate(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function addDays(dateString, dayDelta) {
-  const date = parseLocalDate(dateString);
-  date.setDate(date.getDate() + dayDelta);
-  return formatLocalDate(date);
-}
-
-function isWeekend(dateString) {
-  const day = parseLocalDate(dateString).getDay();
-  return day === 0 || day === 6;
-}
-
-function getUsageDays(startDate, endDate, excludeWeekends) {
-  let days = 0;
-  let currentDate = startDate;
-
-  while (currentDate <= endDate) {
-    if (!excludeWeekends || !isWeekend(currentDate)) {
-      days += 1;
-    }
-
-    currentDate = addDays(currentDate, 1);
-  }
-
-  return days;
 }
 
 async function getItem(db, id) {
@@ -93,113 +58,97 @@ async function getItem(db, id) {
   return item ? normalizeItem(item) : null;
 }
 
-async function ensureDailyCostColumns(db) {
-  const { results } = await db.prepare("PRAGMA table_info(items)").all();
-  const columnNames = new Set(results.map((column) => column.name));
-
-  if (!columnNames.has("cost_mode")) {
-    await db.prepare("ALTER TABLE items ADD COLUMN cost_mode TEXT NOT NULL DEFAULT 'total'").run();
-  }
-
-  if (!columnNames.has("daily_cost")) {
-    await db.prepare("ALTER TABLE items ADD COLUMN daily_cost REAL").run();
-  }
-}
-
 export async function onRequestPatch(context) {
-  await ensureDailyCostColumns(context.env.DB);
-  const id = context.params.id;
-
-  if (!id) {
-    return json({ error: "缺少商品 ID" }, 400);
-  }
-
-  let payload;
-
   try {
-    payload = await context.request.json();
-  } catch {
-    return json({ error: "请求数据格式不正确" }, 400);
-  }
+    const id = context.params.id;
+    if (!id) {
+      throw new RequestError("缺少商品 ID");
+    }
 
-  const updates = {};
+    const payload = await readJsonObject(context.request);
+    const allowedFields = new Set(["endDate", "autoRenew"]);
+    if (Object.keys(payload).some((key) => !allowedFields.has(key))) {
+      throw new RequestError("请求包含不支持的更新字段");
+    }
 
-  if ("autoRenew" in payload) {
-    updates.autoRenew = Boolean(payload.autoRenew);
-  }
+    const hasEndDate = "endDate" in payload;
+    const hasAutoRenew = "autoRenew" in payload;
+    if (!hasEndDate && !hasAutoRenew) {
+      throw new RequestError("没有可更新的内容");
+    }
 
-  if (!("endDate" in payload) && !("autoRenew" in payload)) {
-    return json({ error: "没有可更新的内容" }, 400);
-  }
+    if (hasEndDate && !isAllowedDateString(payload.endDate)) {
+      throw new RequestError("请选择 1900-01-01 至 2100-12-31 之间的有效结束日期");
+    }
 
-  if ("endDate" in payload && !isDateString(payload.endDate)) {
-    return json({ error: "请选择有效结束日期" }, 400);
-  }
+    const autoRenew = getBooleanField(payload, "autoRenew", undefined, "自动续期");
+    const item = await getItem(context.env.DB, id);
+    if (!item) {
+      return json({ error: "商品不存在" }, 404);
+    }
 
-  const item = await getItem(context.env.DB, id);
+    if (!hasEndDate) {
+      await context.env.DB.prepare("UPDATE items SET auto_renew = ? WHERE id = ?")
+        .bind(autoRenew ? 1 : 0, id)
+        .run();
 
-  if (!item) {
-    return json({ error: "商品不存在" }, 404);
-  }
+      return json({ item: { ...item, autoRenew } });
+    }
 
-  if (!("endDate" in payload)) {
-    await context.env.DB.prepare("UPDATE items SET auto_renew = ? WHERE id = ?")
-      .bind(updates.autoRenew ? 1 : 0, id)
+    const calendarDays = getInclusiveDays(item.startDate, payload.endDate);
+    if (calendarDays <= 0) {
+      throw new RequestError("结束日期不能早于使用日期");
+    }
+
+    if (calendarDays > MAX_DATE_SPAN_DAYS) {
+      throw new RequestError(`使用日期跨度不能超过 ${MAX_DATE_SPAN_DAYS} 天`);
+    }
+
+    const plannedDays = getUsageDays(item.startDate, payload.endDate, item.excludeWeekends);
+    if (plannedDays <= 0) {
+      throw new RequestError("使用区间至少需要包含 1 天");
+    }
+
+    const price = item.costMode === "daily" ? Number(item.dailyCost) * plannedDays : item.price;
+    if (!Number.isFinite(price) || price <= 0 || price > MAX_AMOUNT) {
+      throw new RequestError(`价格必须大于 0 且不超过 ${MAX_AMOUNT}`);
+    }
+
+    const nextAutoRenew = hasAutoRenew ? autoRenew : item.autoRenew;
+    await context.env.DB.prepare(
+      "UPDATE items SET end_date = ?, planned_days = ?, price = ?, auto_renew = ? WHERE id = ?",
+    )
+      .bind(payload.endDate, plannedDays, price, nextAutoRenew ? 1 : 0, id)
       .run();
 
     return json({
       item: {
         ...item,
-        autoRenew: updates.autoRenew,
+        price,
+        endDate: payload.endDate,
+        plannedDays,
+        autoRenew: nextAutoRenew,
       },
     });
+  } catch (error) {
+    return handleRequestError(error);
   }
-
-  if (payload.endDate < item.startDate) {
-    return json({ error: "结束日期不能早于使用日期" }, 400);
-  }
-
-  const plannedDays = getUsageDays(item.startDate, payload.endDate, item.excludeWeekends);
-
-  if (plannedDays <= 0) {
-    return json({ error: "使用区间至少需要包含 1 天" }, 400);
-  }
-
-  const price = item.costMode === "daily" ? Number(item.dailyCost) * plannedDays : item.price;
-
-  await context.env.DB.prepare("UPDATE items SET end_date = ?, planned_days = ?, price = ?, auto_renew = ? WHERE id = ?")
-    .bind(
-      payload.endDate,
-      plannedDays,
-      price,
-      "autoRenew" in updates ? (updates.autoRenew ? 1 : 0) : (item.autoRenew ? 1 : 0),
-      id,
-    )
-    .run();
-
-  return json({
-    item: {
-      ...item,
-      price,
-      endDate: payload.endDate,
-      plannedDays,
-      autoRenew: "autoRenew" in updates ? updates.autoRenew : item.autoRenew,
-    },
-  });
 }
 
 export async function onRequestDelete(context) {
-  const id = context.params.id;
+  try {
+    const id = context.params.id;
+    if (!id) {
+      throw new RequestError("缺少商品 ID");
+    }
 
-  if (!id) {
-    return json({ error: "缺少商品 ID" }, 400);
+    const result = await context.env.DB.prepare("DELETE FROM items WHERE id = ?").bind(id).run();
+    if (result.meta.changes === 0) {
+      return json({ error: "商品不存在" }, 404);
+    }
+
+    return json({ ok: true });
+  } catch (error) {
+    return handleRequestError(error);
   }
-
-  const result = await context.env.DB.prepare("DELETE FROM items WHERE id = ?").bind(id).run();
-
-  if (result.meta.changes === 0) {
-    return json({ error: "商品不存在" }, 404);
-  }
-
-  return json({ ok: true });
 }

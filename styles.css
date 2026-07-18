@@ -128,7 +128,14 @@ h2 {
 .entry-panel {
   display: grid;
   gap: 16px;
+  min-width: 0;
   padding: 20px;
+}
+
+.entry-panel > *,
+.date-grid > label,
+.segmented-control > label {
+  min-width: 0;
 }
 
 label {
@@ -141,6 +148,8 @@ label {
 
 input {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 44px;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -211,7 +220,7 @@ input:focus {
 
 .date-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -242,6 +251,16 @@ input:focus {
 
 .primary-button:hover {
   background: var(--brand-dark);
+}
+
+button:focus-visible {
+  outline: 3px solid rgba(23, 108, 114, 0.3);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .secondary-button {
@@ -387,11 +406,6 @@ td {
 
 .day-button:hover {
   background: #d8ebe4;
-}
-
-.day-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
 }
 
 .icon-button {

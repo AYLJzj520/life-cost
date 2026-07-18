@@ -15,4 +15,6 @@ CREATE TABLE IF NOT EXISTS items (
 );
 
 CREATE INDEX IF NOT EXISTS idx_items_end_date ON items (end_date);
-CREATE INDEX IF NOT EXISTS idx_items_renewed_from_id ON items (renewed_from_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_items_unique_renewed_from_id
+  ON items (renewed_from_id)
+  WHERE renewed_from_id IS NOT NULL;

@@ -6,8 +6,11 @@
 
 ```sh
 node --check app.js
+node --check date-utils.js
+node --check renewal-utils.js
 node --check functions/api/items.js
 node --check 'functions/api/items/[id].js'
+npm test
 npm run build
 ```
 
@@ -91,6 +94,24 @@ npx wrangler d1 execute life-cost-db --remote --file=./migrations/20260717_add_u
 npx wrangler d1 execute life-cost-db --remote --file=./migrations/20260717_add_daily_cost_mode.sql
 ```
 
-如果忘记执行该迁移，Pages Functions 会在读取、新增或编辑商品时自动补齐 `cost_mode` 和 `daily_cost` 字段。
+Pages Functions 不会在请求期间修改数据库表结构，因此部署新代码前必须先完成上述迁移。
+
+自动续期并发保护需要执行：
+
+```sh
+npx wrangler d1 execute life-cost-db --remote --file=./migrations/20260718_add_unique_renewal_index.sql
+```
+
+该迁移会保证同一条商品记录最多生成一个直接续期记录。执行前可先检查是否存在重复数据：
+
+```sql
+SELECT renewed_from_id, COUNT(*) AS renewal_count
+FROM items
+WHERE renewed_from_id IS NOT NULL
+GROUP BY renewed_from_id
+HAVING COUNT(*) > 1;
+```
+
+如果查询有结果，需要先人工确认并处理重复记录，再执行唯一索引迁移。
 
 如果需要自定义域名，可以在 Pages 项目的 `Custom domains` 中添加域名，并按 Cloudflare 提示完成 DNS 配置。

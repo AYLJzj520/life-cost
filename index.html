@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>每日平均固定支出</title>
-    <link rel="stylesheet" href="styles.css?v=20260718-wide-list" />
+    <link rel="stylesheet" href="styles.css?v=20260718-optimization" />
   </head>
   <body>
     <main class="app-shell">
@@ -36,7 +36,7 @@
           <h2>新增商品</h2>
           <label>
             商品名称
-            <input id="nameInput" name="name" type="text" autocomplete="off" required />
+            <input id="nameInput" name="name" type="text" maxlength="100" autocomplete="off" required />
           </label>
           <div class="segmented-control" role="radiogroup" aria-label="成本方式">
             <label>
@@ -50,20 +50,20 @@
           </div>
           <label id="priceField">
             购买价格
-            <input id="priceInput" name="price" type="number" min="0.01" step="0.01" required />
+            <input id="priceInput" name="price" type="number" min="0.01" max="1000000000" step="0.01" required />
           </label>
           <label class="duration-field" id="dailyCostField">
             每日成本
-            <input id="dailyCostInput" name="dailyCost" type="number" min="0.01" step="0.01" />
+            <input id="dailyCostInput" name="dailyCost" type="number" min="0.01" max="1000000000" step="0.01" />
           </label>
           <div class="date-grid">
             <label>
               使用日期
-              <input id="startDateInput" name="startDate" type="date" required />
+              <input id="startDateInput" name="startDate" type="date" min="1900-01-01" max="2100-12-31" required />
             </label>
             <label id="endDateField">
               结束日期
-              <input id="endDateInput" name="endDate" type="date" required />
+              <input id="endDateInput" name="endDate" type="date" min="1900-01-01" max="2100-12-31" required />
             </label>
           </div>
           <div class="segmented-control" id="endModeField" role="radiogroup" aria-label="结束方式">
@@ -78,7 +78,7 @@
           </div>
           <label class="duration-field" id="plannedDaysField">
             预计使用天数
-            <input id="plannedDaysInput" name="plannedDays" type="number" min="1" step="1" />
+            <input id="plannedDaysInput" name="plannedDays" type="number" min="1" max="36600" step="1" />
           </label>
           <div class="option-grid">
             <label class="check-option">
@@ -91,15 +91,15 @@
             </label>
           </div>
           <p class="form-error" id="formError" role="alert"></p>
-          <button class="primary-button" type="submit">添加商品</button>
+          <button class="primary-button" id="submitButton" type="submit">添加商品</button>
         </form>
 
         <section class="list-panel" aria-label="商品列表">
           <div class="tabs" role="tablist" aria-label="商品状态">
-            <button class="tab is-active" id="activeTab" type="button" role="tab">使用中</button>
-            <button class="tab" id="archivedTab" type="button" role="tab">已归档</button>
+            <button class="tab is-active" id="activeTab" type="button" role="tab" aria-selected="true" aria-controls="itemPanel">使用中</button>
+            <button class="tab" id="archivedTab" type="button" role="tab" aria-selected="false" aria-controls="itemPanel" tabindex="-1">已归档</button>
           </div>
-          <div class="table-wrap">
+          <div class="table-wrap" id="itemPanel" role="tabpanel" aria-label="商品列表内容">
             <table>
               <thead>
                 <tr>
@@ -120,9 +120,9 @@
       </section>
     </main>
 
-    <div class="modal-backdrop" id="editDialog" hidden>
+    <div class="modal-backdrop" id="editDialog" role="dialog" aria-modal="true" aria-labelledby="editDialogTitle" hidden>
       <form class="modal-panel" id="editForm">
-        <h2>编辑商品</h2>
+        <h2 id="editDialogTitle">编辑商品</h2>
         <p class="modal-item-name" id="editItemName"></p>
         <label class="check-option">
           <input id="editAutoRenewInput" name="autoRenew" type="checkbox" />
@@ -131,11 +131,11 @@
         <p class="form-error" id="editError" role="alert"></p>
         <div class="modal-actions">
           <button class="secondary-button" id="editCancelButton" type="button">取消</button>
-          <button class="primary-button" type="submit">保存</button>
+          <button class="primary-button" id="editSubmitButton" type="submit">保存</button>
         </div>
       </form>
     </div>
 
-    <script src="app.js?v=20260718-wide-list"></script>
+    <script type="module" src="app.js?v=20260718-optimization"></script>
   </body>
 </html>
