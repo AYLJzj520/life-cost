@@ -19,6 +19,7 @@ import { createRenewalItem } from "../../renewal-utils.js";
 const MAX_NAME_LENGTH = 100;
 const MAX_AMOUNT = 1_000_000_000;
 const MAX_RENEWALS_PER_REQUEST = 40;
+const ARCHIVE_PAGE_SIZE = 50;
 
 function normalizeItem(row) {
   return {
@@ -151,7 +152,7 @@ export function normalizeNewItemPayload(payload) {
   };
 }
 
-async function listItems(db) {
+async function listActiveItems(db, today) {
   const { results } = await db
     .prepare(
       `SELECT
@@ -169,11 +170,78 @@ async function listItems(db) {
         renewed_from_id AS renewedFromId,
         created_at AS createdAt
       FROM items
-      ORDER BY created_at DESC`,
+      WHERE end_date >= ?
+      ORDER BY end_date ASC, created_at DESC, id DESC`,
     )
+    .bind(today)
     .all();
 
   return results.map(normalizeItem);
+}
+
+async function getArchivedCount(db, today) {
+  const row = await db
+    .prepare("SELECT COUNT(*) AS archivedCount FROM items WHERE end_date < ?")
+    .bind(today)
+    .first();
+  return Number(row?.archivedCount || 0);
+}
+
+async function listArchivedItems(db, today, requestedPage) {
+  const archivedCount = await getArchivedCount(db, today);
+  const totalPages = Math.max(1, Math.ceil(archivedCount / ARCHIVE_PAGE_SIZE));
+  const page = Math.min(requestedPage, totalPages);
+  const offset = (page - 1) * ARCHIVE_PAGE_SIZE;
+  const { results } = await db
+    .prepare(
+      `SELECT
+        id,
+        name,
+        price,
+        cost_mode AS costMode,
+        daily_cost AS dailyCost,
+        start_date AS startDate,
+        end_date AS endDate,
+        end_mode AS endMode,
+        planned_days AS plannedDays,
+        exclude_weekends AS excludeWeekends,
+        auto_renew AS autoRenew,
+        renewed_from_id AS renewedFromId,
+        created_at AS createdAt
+      FROM items
+      WHERE end_date < ?
+      ORDER BY end_date DESC, created_at DESC, id DESC
+      LIMIT ? OFFSET ?`,
+    )
+    .bind(today, ARCHIVE_PAGE_SIZE, offset)
+    .all();
+
+  return {
+    items: results.map(normalizeItem),
+    archivedCount,
+    pagination: {
+      page,
+      pageSize: ARCHIVE_PAGE_SIZE,
+      totalItems: archivedCount,
+      totalPages,
+    },
+  };
+}
+
+function getDailyCost(item) {
+  if (item.costMode === "daily") {
+    return Number(item.dailyCost);
+  }
+
+  return Number(item.price) / getUsageDays(item.startDate, item.endDate, item.excludeWeekends);
+}
+
+function getSummary(activeItems, archivedCount) {
+  return {
+    activeCount: activeItems.length,
+    archivedCount,
+    activeDailyCost: activeItems.reduce((sum, item) => sum + getDailyCost(item), 0),
+  };
 }
 
 async function listRenewableLeaves(db, today) {
@@ -254,41 +322,121 @@ async function insertRenewalIfAbsent(db, sourceItem) {
     .run();
 
   if (result.meta.changes > 0) {
-    return renewal;
+    return { item: renewal, inserted: true };
   }
 
-  return null;
+  const existingChild = await db
+    .prepare(
+      `SELECT
+        id,
+        name,
+        price,
+        cost_mode AS costMode,
+        daily_cost AS dailyCost,
+        start_date AS startDate,
+        end_date AS endDate,
+        end_mode AS endMode,
+        planned_days AS plannedDays,
+        exclude_weekends AS excludeWeekends,
+        auto_renew AS autoRenew,
+        renewed_from_id AS renewedFromId,
+        created_at AS createdAt
+      FROM items
+      WHERE renewed_from_id = ?`,
+    )
+    .bind(sourceItem.id)
+    .first();
+
+  return existingChild ? { item: normalizeItem(existingChild), inserted: false } : null;
+}
+
+async function hasRenewableLeaves(db, today) {
+  const row = await db
+    .prepare(
+      `SELECT 1 AS value
+      FROM items AS source
+      WHERE source.auto_renew = 1
+        AND source.end_date < ?
+        AND NOT EXISTS (
+          SELECT 1
+          FROM items AS child
+          WHERE child.renewed_from_id = source.id
+        )
+      LIMIT 1`,
+    )
+    .bind(today)
+    .first();
+
+  return Boolean(row);
 }
 
 export async function renewExpiredItems(db, today) {
-  const renewableLeaves = await listRenewableLeaves(db, today);
+  let renewableLeaves = await listRenewableLeaves(db, today);
   let renewalCount = 0;
 
-  for (const leaf of renewableLeaves) {
-    if (renewalCount >= MAX_RENEWALS_PER_REQUEST) {
-      break;
-    }
+  while (renewableLeaves.length > 0 && renewalCount < MAX_RENEWALS_PER_REQUEST) {
+    const nextRound = [];
 
-    let currentItem = leaf;
-
-    while (currentItem.autoRenew && currentItem.endDate < today && renewalCount < MAX_RENEWALS_PER_REQUEST) {
-      const nextItem = await insertRenewalIfAbsent(db, currentItem);
-      if (!nextItem) {
+    for (const leaf of renewableLeaves) {
+      if (renewalCount >= MAX_RENEWALS_PER_REQUEST) {
         break;
       }
 
-      currentItem = nextItem;
-      renewalCount += 1;
+      const renewalResult = await insertRenewalIfAbsent(db, leaf);
+      if (!renewalResult) {
+        continue;
+      }
+
+      if (renewalResult.inserted) {
+        renewalCount += 1;
+      }
+
+      const nextItem = renewalResult.item;
+      if (nextItem.autoRenew && nextItem.endDate < today) {
+        nextRound.push(nextItem);
+      }
     }
+
+    renewableLeaves = nextRound;
   }
+
+  return {
+    renewalCount,
+    hasMore: await hasRenewableLeaves(db, today),
+  };
 }
 
 export async function onRequestGet(context) {
   try {
     const today = getTodayDateString();
-    await renewExpiredItems(context.env.DB, today);
-    const items = await listItems(context.env.DB);
-    return json({ items });
+    const url = new URL(context.request.url);
+    const view = url.searchParams.get("view") || "active";
+    if (view !== "active" && view !== "archived") {
+      throw new RequestError("不支持的商品列表类型");
+    }
+
+    const pageValue = url.searchParams.get("page") || "1";
+    const page = Number(pageValue);
+    if (!Number.isInteger(page) || page <= 0) {
+      throw new RequestError("页码必须是正整数");
+    }
+
+    const activeItems = await listActiveItems(context.env.DB, today);
+    if (view === "active") {
+      const archivedCount = await getArchivedCount(context.env.DB, today);
+      return json({
+        items: activeItems,
+        summary: getSummary(activeItems, archivedCount),
+        pagination: null,
+      });
+    }
+
+    const archivedResult = await listArchivedItems(context.env.DB, today, page);
+    return json({
+      items: archivedResult.items,
+      summary: getSummary(activeItems, archivedResult.archivedCount),
+      pagination: archivedResult.pagination,
+    });
   } catch (error) {
     return handleRequestError(error);
   }

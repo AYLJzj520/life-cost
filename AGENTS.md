@@ -12,10 +12,11 @@
 - `api-utils.js`：Pages Functions 共用的 JSON 请求体限制、错误响应和严格布尔值读取。
 - `functions/api/items.js`：Pages Function API，负责从 D1 列表读取和新增商品。
 - `functions/api/items/[id].js`：Pages Function API，负责按 ID 更新结束日期、更新自动续期开关和删除商品。
+- `functions/api/items/renew.js`：独立的自动续期写接口，按批次推进过期续期链。
 - `schema.sql`：Cloudflare D1 数据库表结构。
 - `migrations/`：线上 D1 已存在表结构的增量迁移 SQL。
-- `tests/`：使用 Node 内置测试运行器验证日期、工作日、自然周、续期和 API 规范化逻辑。
-- `package.json`：提供 Cloudflare Pages 可执行的 `npm run build` 构建命令。
+- `tests/`：使用 Node 内置测试运行器验证日期、工作日、自然周、续期积压与并发、列表分页、PATCH、DELETE 和 API 规范化逻辑。
+- `package.json`：提供 `npm run check` 验证命令，并在 Cloudflare Pages 执行 `npm run build` 前通过 `prebuild` 自动运行检查。
 - `.gitignore`：忽略本地和 Cloudflare 构建生成的 `dist/` 目录。
 - `README.md`：说明本地验证方式与 Cloudflare Pages 自动部署配置。
 - 数据保存在 Cloudflare D1 的 `items` 表中，Pages Function 通过绑定名 `DB` 访问数据库。
@@ -25,8 +26,10 @@
 - 使用中的商品支持通过 `+1天` / `-1天` 调整结束日期，并基于新天数重新计算日均成本；结束日期不能早于使用日期。
 - 新增商品支持总价分摊或每日固定成本；总价分摊支持按结束日期或预计使用天数设置周期；每日固定成本按使用日期所在自然周自动设置周期，勾选不包含周末时为周一至周五，否则为周一至周日；勾选自动续期后，到期归档并生成下一周期的同名商品。
 - 已生成商品支持通过编辑弹窗修改到期后是否自动续期。
+- 使用中商品和汇总通过只读 GET 加载；自动续期由独立 POST 接口按每批最多 40 条处理，前端会继续请求至积压周期全部补齐，并按商品轮转避免单个商品独占额度。
+- 已归档商品由 API 按每页 50 条分页读取，前端提供上一页、下一页和加载/重试状态；列表操作错误显示在对应商品行内。
 - 每日固定成本模式使用 `cost_mode` 和 `daily_cost` 字段；对应迁移文件为 `migrations/20260717_add_daily_cost_mode.sql`，部署前必须完成数据库迁移，API 请求期间不修改表结构。
-- 自动续期会在一次读取中补齐遗漏的多个周期，并通过 `renewed_from_id` 唯一索引与条件插入避免并发重复；对应迁移文件为 `migrations/20260718_add_unique_renewal_index.sql`。
+- 自动续期通过 `renewed_from_id` 唯一索引、条件插入和并发时跟随已有子记录避免重复；对应迁移文件为 `migrations/20260718_add_unique_renewal_index.sql`，旧普通索引可通过 `migrations/20260718_remove_redundant_renewal_index.sql` 清理。
 - 日期计算统一使用 UTC 日序号，业务上的“今天”固定按 `Asia/Shanghai` 时区确定，避免浏览器夏令时造成天数误差。
 - API 限制 JSON 请求体、名称长度、金额、真实日期范围和日期跨度，并严格要求布尔字段使用 JSON 布尔值。
 - 新增、编辑、日期调整和删除操作具备重复提交防护；删除前需要用户确认，编辑弹窗和列表标签页提供键盘与 ARIA 支持。
@@ -39,6 +42,7 @@
 - 修改数据结构时同步更新 `schema.sql`、Pages Functions 和 `README.md` 的部署说明。
 - 修改已上线数据库字段时新增 `migrations/` 迁移文件，并在部署前后确认线上 D1 已执行迁移。
 - Cloudflare Pages 部署使用 `npm run build`，输出目录为 `dist`；保持构建脚本只复制实际发布所需的静态文件。
+- `npm run build` 必须通过 `prebuild` 执行 `npm run check`，确保语法检查和测试失败时阻止部署构建。
 - 前端静态资源如 `app.js` 或 `styles.css` 修改后，可在 `index.html` 的资源地址上更新版本查询参数，避免浏览器或 CDN 继续使用旧缓存。
 - Cloudflare D1 绑定名固定为 `DB`，不要在代码中改成其他名字，除非同步更新部署文档。
 - `dist/` 是构建产物，不提交到仓库。

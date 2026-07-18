@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>每日平均固定支出</title>
-    <link rel="stylesheet" href="styles.css?v=20260718-optimization" />
+    <link rel="stylesheet" href="styles.css?v=20260718-pagination-status" />
   </head>
   <body>
     <main class="app-shell">
@@ -99,6 +99,10 @@
             <button class="tab is-active" id="activeTab" type="button" role="tab" aria-selected="true" aria-controls="itemPanel">使用中</button>
             <button class="tab" id="archivedTab" type="button" role="tab" aria-selected="false" aria-controls="itemPanel" tabindex="-1">已归档</button>
           </div>
+          <div class="list-status-row" id="listStatusRow" hidden>
+            <p class="list-status" id="listStatus" role="status" aria-live="polite"></p>
+            <button class="secondary-button list-retry-button" id="listRetryButton" type="button" hidden>重试</button>
+          </div>
           <div class="table-wrap" id="itemPanel" role="tabpanel" aria-label="商品列表内容">
             <table>
               <thead>
@@ -116,6 +120,11 @@
             </table>
             <div class="empty-state" id="emptyState">暂无商品</div>
           </div>
+          <nav class="pagination" id="archivePagination" aria-label="已归档商品分页" hidden>
+            <button class="secondary-button" id="archivePreviousButton" type="button">上一页</button>
+            <span id="archivePageText">第 1 / 1 页</span>
+            <button class="secondary-button" id="archiveNextButton" type="button">下一页</button>
+          </nav>
         </section>
       </section>
     </main>
@@ -136,6 +145,6 @@
       </form>
     </div>
 
-    <script type="module" src="app.js?v=20260718-remaining-sort"></script>
+    <script type="module" src="app.js?v=20260718-pagination-renewal"></script>
   </body>
 </html>

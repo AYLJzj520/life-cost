@@ -11,12 +11,29 @@ import {
 
 const state = {
   items: [],
+  summary: {
+    activeDailyCost: 0,
+    activeCount: 0,
+    archivedCount: 0,
+  },
+  archivePagination: {
+    page: 1,
+    pageSize: 50,
+    totalItems: 0,
+    totalPages: 1,
+  },
   view: "active",
   editingItemId: "",
   dialogTrigger: null,
   isSubmitting: false,
   isEditing: false,
+  isLoadingItems: true,
+  loadingMessage: "正在加载商品…",
+  listError: "",
+  renewalError: "",
+  loadRequestId: 0,
   pendingItemIds: new Set(),
+  rowErrors: new Map(),
 };
 
 const elements = {
@@ -44,8 +61,15 @@ const elements = {
   archivedCount: document.querySelector("#archivedCount"),
   activeTab: document.querySelector("#activeTab"),
   archivedTab: document.querySelector("#archivedTab"),
+  listStatusRow: document.querySelector("#listStatusRow"),
+  listStatus: document.querySelector("#listStatus"),
+  listRetryButton: document.querySelector("#listRetryButton"),
   itemRows: document.querySelector("#itemRows"),
   emptyState: document.querySelector("#emptyState"),
+  archivePagination: document.querySelector("#archivePagination"),
+  archivePreviousButton: document.querySelector("#archivePreviousButton"),
+  archiveNextButton: document.querySelector("#archiveNextButton"),
+  archivePageText: document.querySelector("#archivePageText"),
   editDialog: document.querySelector("#editDialog"),
   editForm: document.querySelector("#editForm"),
   editItemName: document.querySelector("#editItemName"),
@@ -210,7 +234,7 @@ function syncEndModeFields() {
   elements.plannedDaysInput.required = costMode !== "daily" && endMode === "duration";
 }
 
-function setView(view) {
+function setView(view, { load = true } = {}) {
   state.view = view;
   const isActiveView = view === "active";
   elements.activeTab.classList.toggle("is-active", isActiveView);
@@ -220,6 +244,10 @@ function setView(view) {
   elements.activeTab.tabIndex = isActiveView ? 0 : -1;
   elements.archivedTab.tabIndex = isActiveView ? -1 : 0;
   render();
+
+  if (load) {
+    loadItems(view === "archived" ? 1 : undefined);
+  }
 }
 
 async function fetchJson(url, options) {
@@ -233,14 +261,91 @@ async function fetchJson(url, options) {
   return data;
 }
 
-async function loadItems() {
+async function renewExpiredItems() {
+  let hasMore = true;
+  let totalRenewals = 0;
+
+  while (hasMore) {
+    state.loadingMessage = totalRenewals > 0
+      ? `正在补齐自动续期，已生成 ${totalRenewals} 条…`
+      : "正在检查自动续期…";
+    renderListState();
+
+    const result = await fetchJson("/api/items/renew", { method: "POST" });
+    const renewalCount = Number(result.renewalCount || 0);
+    totalRenewals += renewalCount;
+    hasMore = Boolean(result.hasMore);
+
+    if (hasMore && renewalCount === 0) {
+      throw new Error("自动续期暂时无法继续，请稍后重试");
+    }
+  }
+
+  return totalRenewals;
+}
+
+async function loadItems(page = state.archivePagination.page) {
+  const requestId = state.loadRequestId + 1;
+  state.loadRequestId = requestId;
+  state.isLoadingItems = true;
+  state.loadingMessage = "正在加载商品…";
+  state.listError = "";
+  state.items = [];
+  render();
+
   try {
-    const data = await fetchJson("/api/items");
+    const query = new URLSearchParams({ view: state.view });
+    if (state.view === "archived") {
+      query.set("page", String(page));
+    }
+
+    const data = await fetchJson(`/api/items?${query}`);
+    if (requestId !== state.loadRequestId) {
+      return;
+    }
+
     state.items = data.items || [];
-    elements.formError.textContent = "";
-    render();
+    state.summary = {
+      activeDailyCost: Number(data.summary?.activeDailyCost || 0),
+      activeCount: Number(data.summary?.activeCount || 0),
+      archivedCount: Number(data.summary?.archivedCount || 0),
+    };
+    if (data.pagination) {
+      state.archivePagination = data.pagination;
+    }
+    state.rowErrors.clear();
   } catch (error) {
-    elements.formError.textContent = error.message;
+    if (requestId === state.loadRequestId) {
+      state.listError = error.message;
+    }
+  } finally {
+    if (requestId === state.loadRequestId) {
+      state.isLoadingItems = false;
+      render();
+    }
+  }
+}
+
+async function initializeItems() {
+  state.isLoadingItems = true;
+  state.listError = "";
+  state.renewalError = "";
+  render();
+
+  try {
+    await renewExpiredItems();
+  } catch (error) {
+    state.renewalError = `自动续期失败：${error.message}`;
+  }
+
+  await loadItems(state.view === "archived" ? 1 : undefined);
+}
+
+function setRowError(itemId, message = "") {
+  if (message) {
+    state.rowErrors.set(itemId, message);
+  } else {
+    state.rowErrors.delete(itemId);
   }
 }
 
@@ -255,16 +360,16 @@ async function deleteItem(item) {
   }
 
   state.pendingItemIds.add(item.id);
-  elements.formError.textContent = "";
+  setRowError(item.id);
   render();
 
   try {
     await fetchJson(`/api/items/${encodeURIComponent(item.id)}`, {
       method: "DELETE",
     });
-    state.items = state.items.filter((currentItem) => currentItem.id !== item.id);
+    await loadItems(state.view === "archived" ? state.archivePagination.page : undefined);
   } catch (error) {
-    elements.formError.textContent = error.message;
+    setRowError(item.id, error.message);
   } finally {
     state.pendingItemIds.delete(item.id);
     render();
@@ -279,12 +384,13 @@ async function updateEndDate(item, dayDelta) {
   const nextEndDate = addUsageDays(item.endDate, dayDelta, item.excludeWeekends);
 
   if (nextEndDate < item.startDate) {
-    elements.formError.textContent = "结束日期不能早于使用日期";
+    setRowError(item.id, "结束日期不能早于使用日期");
+    render();
     return;
   }
 
   state.pendingItemIds.add(item.id);
-  elements.formError.textContent = "";
+  setRowError(item.id);
   render();
 
   try {
@@ -297,9 +403,9 @@ async function updateEndDate(item, dayDelta) {
     });
 
     state.items = state.items.map((currentItem) => (currentItem.id === item.id ? data.item : currentItem));
-    elements.formError.textContent = "";
+    await loadItems();
   } catch (error) {
-    elements.formError.textContent = error.message;
+    setRowError(item.id, error.message);
   } finally {
     state.pendingItemIds.delete(item.id);
     render();
@@ -440,14 +546,31 @@ async function handleEditSubmit(event) {
 
 function renderSummary() {
   const today = getTodayDateString();
-  const activeItems = state.items.filter((item) => !isArchived(item, today));
-  const archivedItems = state.items.filter((item) => isArchived(item, today));
-  const activeDailyCost = activeItems.reduce((sum, item) => sum + getDailyCost(item), 0);
 
   elements.todayText.textContent = today;
-  elements.activeDailyCost.textContent = formatCurrency(activeDailyCost);
-  elements.activeCount.textContent = String(activeItems.length);
-  elements.archivedCount.textContent = String(archivedItems.length);
+  elements.activeDailyCost.textContent = formatCurrency(state.summary.activeDailyCost);
+  elements.activeCount.textContent = String(state.summary.activeCount);
+  elements.archivedCount.textContent = String(state.summary.archivedCount);
+}
+
+function renderListState() {
+  const errorMessage = state.listError || state.renewalError;
+  const statusMessage = state.isLoadingItems ? state.loadingMessage : errorMessage;
+  elements.listStatusRow.hidden = !statusMessage;
+  elements.listStatus.textContent = statusMessage;
+  elements.listStatus.classList.toggle("is-error", Boolean(!state.isLoadingItems && errorMessage));
+  elements.listRetryButton.hidden = state.isLoadingItems || !errorMessage;
+
+  const showPagination = state.view === "archived"
+    && !state.isLoadingItems
+    && !state.listError
+    && state.archivePagination.totalItems > 0;
+  elements.archivePagination.hidden = !showPagination;
+  elements.archivePreviousButton.disabled = state.archivePagination.page <= 1 || state.isLoadingItems;
+  elements.archiveNextButton.disabled = (
+    state.archivePagination.page >= state.archivePagination.totalPages || state.isLoadingItems
+  );
+  elements.archivePageText.textContent = `第 ${state.archivePagination.page} / ${state.archivePagination.totalPages} 页`;
 }
 
 function renderRows() {
@@ -460,13 +583,18 @@ function renderRows() {
         if (remainingDaysDifference !== 0) {
           return remainingDaysDifference;
         }
+
+        return a.endDate.localeCompare(b.endDate);
       }
 
-      return a.endDate.localeCompare(b.endDate);
+      return 0;
     });
 
   elements.itemRows.innerHTML = "";
-  elements.emptyState.classList.toggle("is-visible", visibleItems.length === 0);
+  elements.emptyState.classList.toggle(
+    "is-visible",
+    !state.isLoadingItems && !state.listError && visibleItems.length === 0,
+  );
 
   visibleItems.forEach((item) => {
     const archived = isArchived(item, today);
@@ -482,7 +610,12 @@ function renderRows() {
       <td></td>
       <td></td>
       <td><span class="cost-chip"></span></td>
-      <td><div class="row-actions"></div></td>
+      <td>
+        <div class="row-action-stack">
+          <div class="row-actions"></div>
+          <p class="row-error" role="alert"></p>
+        </div>
+      </td>
     `;
 
     row.children[0].textContent = item.name;
@@ -520,6 +653,7 @@ function renderRows() {
     row.querySelector(".cost-chip").textContent = formatCurrency(getDailyCost(item));
 
     const actions = row.querySelector(".row-actions");
+    row.querySelector(".row-error").textContent = state.rowErrors.get(item.id) || "";
 
     const editButton = document.createElement("button");
     editButton.className = "edit-button";
@@ -567,6 +701,7 @@ function renderRows() {
 
 function render() {
   renderSummary();
+  renderListState();
   renderRows();
 }
 
@@ -591,7 +726,7 @@ async function handleSubmit(event) {
   elements.submitButton.textContent = "添加中…";
 
   try {
-    const data = await fetchJson("/api/items", {
+    await fetchJson("/api/items", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -599,12 +734,11 @@ async function handleSubmit(event) {
       body: JSON.stringify(item),
     });
 
-    state.items.unshift(data.item);
     elements.form.reset();
     elements.startDateInput.value = getTodayDateString();
     syncCostModeFields();
     syncEndModeFields();
-    render();
+    await loadItems(state.view === "archived" ? 1 : undefined);
   } catch (requestError) {
     elements.formError.textContent = requestError.message;
   } finally {
@@ -628,10 +762,27 @@ elements.endModeInputs.forEach((input) => input.addEventListener("change", syncE
 elements.costModeInputs.forEach((input) => input.addEventListener("change", syncCostModeFields));
 elements.activeTab.addEventListener("click", () => setView("active"));
 elements.archivedTab.addEventListener("click", () => setView("archived"));
+elements.archivePreviousButton.addEventListener("click", () => {
+  if (state.archivePagination.page > 1) {
+    loadItems(state.archivePagination.page - 1);
+  }
+});
+elements.archiveNextButton.addEventListener("click", () => {
+  if (state.archivePagination.page < state.archivePagination.totalPages) {
+    loadItems(state.archivePagination.page + 1);
+  }
+});
+elements.listRetryButton.addEventListener("click", () => {
+  if (state.renewalError) {
+    initializeItems();
+  } else {
+    loadItems();
+  }
+});
 elements.activeTab.addEventListener("keydown", handleTabKeydown);
 elements.archivedTab.addEventListener("keydown", handleTabKeydown);
 elements.startDateInput.value = getTodayDateString();
-setView("active");
+setView("active", { load: false });
 syncCostModeFields();
 syncEndModeFields();
-loadItems();
+initializeItems();

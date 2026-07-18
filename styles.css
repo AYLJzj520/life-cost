@@ -290,6 +290,39 @@ button:disabled {
   background: #fbfcfb;
 }
 
+.list-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 8px 14px 0;
+}
+
+.list-status-row[hidden] {
+  display: none;
+}
+
+.list-status {
+  min-height: 22px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.list-status.is-error {
+  color: var(--accent);
+}
+
+.list-retry-button {
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.list-retry-button[hidden] {
+  display: none;
+}
+
 .tab {
   min-width: 92px;
   min-height: 38px;
@@ -381,6 +414,20 @@ td {
   min-width: 210px;
 }
 
+.row-action-stack {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+}
+
+.row-error {
+  max-width: 240px;
+  margin: 0;
+  color: var(--accent);
+  font-size: 12px;
+  text-align: right;
+}
+
 .edit-button,
 .day-button {
   min-width: 50px;
@@ -432,6 +479,27 @@ td {
 
 .empty-state.is-visible {
   display: block;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding: 12px 14px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.pagination[hidden] {
+  display: none;
+}
+
+.pagination .secondary-button {
+  min-height: 36px;
+  padding: 0 12px;
 }
 
 .modal-backdrop {

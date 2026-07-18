@@ -1,6 +1,8 @@
 {
   "type": "module",
   "scripts": {
+    "check": "node --check app.js && node --check date-utils.js && node --check renewal-utils.js && node --check api-utils.js && node --check functions/api/items.js && node --check 'functions/api/items/[id].js' && node --check functions/api/items/renew.js && npm test",
+    "prebuild": "npm run check",
     "build": "mkdir -p dist && cp index.html styles.css app.js date-utils.js dist/",
     "test": "node --test"
   },

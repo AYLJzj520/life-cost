@@ -5,16 +5,11 @@
 ## 本地验证
 
 ```sh
-node --check app.js
-node --check date-utils.js
-node --check renewal-utils.js
-node --check functions/api/items.js
-node --check 'functions/api/items/[id].js'
-npm test
+npm run check
 npm run build
 ```
 
-`npm run build` 会把实际发布所需的静态文件复制到 `dist/`。
+`npm run check` 会执行前端、日期工具、Pages Functions 的语法检查和全部 Node 测试。`npm run build` 会先通过 `prebuild` 自动执行这些检查，再把实际发布所需的静态文件复制到 `dist/`，检查失败时不会继续部署构建。
 
 ## Cloudflare Pages 自动部署
 
@@ -71,6 +66,13 @@ npx wrangler d1 execute life-cost-db --remote --file=./schema.sql
 
 当前版本没有登录系统，所以任何能访问网站的人都会使用同一个数据库。只给自己用时，建议通过 Cloudflare Access 或其他访问控制方式限制网站访问。
 
+## 商品读取、续期与归档分页
+
+- `GET /api/items?view=active` 只读取使用中商品和汇总数据，不执行数据库写入。
+- `POST /api/items/renew` 单次最多生成 40 条续期记录，并返回 `hasMore`；前端会按批次继续请求，直到所有积压周期补齐。
+- 同一批次按商品轮转生成续期，避免单个长期积压商品独占全部写入额度。
+- `GET /api/items?view=archived&page=1` 按每页 50 条返回已归档商品，同时返回总页数和总条数。
+
 ## 使用说明
 
 新增商品时可以选择两种成本方式：
@@ -113,5 +115,13 @@ HAVING COUNT(*) > 1;
 ```
 
 如果查询有结果，需要先人工确认并处理重复记录，再执行唯一索引迁移。
+
+唯一索引迁移完成后，可以执行下面的索引清理迁移，移除已被唯一部分索引覆盖的旧普通索引：
+
+```sh
+npx wrangler d1 execute life-cost-db --remote --file=./migrations/20260718_remove_redundant_renewal_index.sql
+```
+
+当前金额字段仍使用 SQLite `REAL`。改为整数分需要兼容旧数据的分阶段迁移和双读验证，因此未与本次续期、分页改动合并实施。对既有表增加跨字段 `CHECK` 约束同样需要重建表，后续应作为独立数据库迁移处理。
 
 如果需要自定义域名，可以在 Pages 项目的 `Custom domains` 中添加域名，并按 Cloudflare 提示完成 DNS 配置。
