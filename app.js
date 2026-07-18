@@ -29,6 +29,7 @@ const state = {
   dialogTrigger: null,
   isSubmitting: false,
   isEditing: false,
+  editingAmount: 0,
   isLoadingItems: true,
   loadingMessage: "正在加载商品…",
   listError: "",
@@ -76,7 +77,10 @@ const elements = {
   editForm: document.querySelector("#editForm"),
   editItemName: document.querySelector("#editItemName"),
   editAmountLabel: document.querySelector("#editAmountLabel"),
-  editAmountInput: document.querySelector("#editAmountInput"),
+  editCurrentAmount: document.querySelector("#editCurrentAmount"),
+  editAmountDeltaInput: document.querySelector("#editAmountDeltaInput"),
+  editAmountDecreaseButton: document.querySelector("#editAmountDecreaseButton"),
+  editAmountIncreaseButton: document.querySelector("#editAmountIncreaseButton"),
   editEndDateInput: document.querySelector("#editEndDateInput"),
   editDayDecreaseButton: document.querySelector("#editDayDecreaseButton"),
   editDayIncreaseButton: document.querySelector("#editDayIncreaseButton"),
@@ -453,9 +457,11 @@ function syncEditPreview() {
     return;
   }
 
-  const amount = Number(elements.editAmountInput.value);
+  const amount = state.editingAmount;
+  const amountDelta = Number(elements.editAmountDeltaInput.value);
   const endDate = elements.editEndDateInput.value;
   const validAmount = Number.isFinite(amount) && amount > 0 && amount <= MAX_AMOUNT;
+  const validAmountDelta = Number.isFinite(amountDelta) && amountDelta > 0 && amountDelta <= MAX_AMOUNT;
   const validEndDate = isAllowedDateString(endDate)
     && endDate >= item.startDate
     && getInclusiveDays(item.startDate, endDate) <= MAX_DATE_SPAN_DAYS;
@@ -471,9 +477,40 @@ function syncEditPreview() {
   elements.editUsageDays.textContent = usageDays > 0 ? `${usageDays} 天` : "-";
   elements.editRemainingDays.textContent = usageDays > 0 ? `${remainingDays} 天` : "-";
   elements.editDailyCost.textContent = Number.isFinite(dailyCost) ? formatCurrency(dailyCost) : "-";
+  elements.editCurrentAmount.textContent = validAmount ? formatCurrency(amount) : "-";
 
+  elements.editAmountDecreaseButton.disabled = state.isEditing
+    || !validAmountDelta
+    || amount - amountDelta <= 0;
+  elements.editAmountIncreaseButton.disabled = state.isEditing
+    || !validAmountDelta
+    || amount + amountDelta > MAX_AMOUNT;
   elements.editDayDecreaseButton.disabled = state.isEditing || !getAdjustedEditEndDate(item, -1);
   elements.editDayIncreaseButton.disabled = state.isEditing || !getAdjustedEditEndDate(item, 1);
+}
+
+function adjustEditAmount(direction) {
+  const amountDelta = Number(elements.editAmountDeltaInput.value);
+  if (!Number.isFinite(amountDelta) || amountDelta <= 0 || amountDelta > MAX_AMOUNT) {
+    elements.editError.textContent = `调整金额必须大于 0 且不超过 ${MAX_AMOUNT}`;
+    return;
+  }
+
+  const nextAmount = Math.round((state.editingAmount + direction * amountDelta) * 100) / 100;
+  if (nextAmount <= 0) {
+    elements.editError.textContent = "减少后的金额必须大于 0";
+    return;
+  }
+
+  if (nextAmount > MAX_AMOUNT) {
+    elements.editError.textContent = `调整后的金额不能超过 ${MAX_AMOUNT}`;
+    return;
+  }
+
+  state.editingAmount = nextAmount;
+  elements.editAmountDeltaInput.value = "";
+  elements.editError.textContent = "";
+  syncEditPreview();
 }
 
 function adjustEditEndDate(dayDelta) {
@@ -500,15 +537,16 @@ function openEditDialog(item) {
   state.editingItemId = item.id;
   state.dialogTrigger = document.activeElement;
   elements.editItemName.textContent = item.name;
-  elements.editAmountLabel.textContent = item.costMode === "daily" ? "每日成本" : "总金额";
-  elements.editAmountInput.value = String(item.costMode === "daily" ? item.dailyCost : item.price);
+  state.editingAmount = Number(item.costMode === "daily" ? item.dailyCost : item.price);
+  elements.editAmountLabel.textContent = item.costMode === "daily" ? "当前每日成本" : "当前总金额";
+  elements.editAmountDeltaInput.value = "";
   elements.editEndDateInput.min = item.startDate;
   elements.editEndDateInput.value = item.endDate;
   elements.editAutoRenewInput.checked = item.autoRenew;
   elements.editError.textContent = "";
   elements.editDialog.hidden = false;
   syncEditPreview();
-  elements.editAmountInput.focus();
+  elements.editAmountDeltaInput.focus();
 }
 
 function closeEditDialog() {
@@ -519,6 +557,7 @@ function closeEditDialog() {
   const trigger = state.dialogTrigger;
   const editingItemId = state.editingItemId;
   state.editingItemId = "";
+  state.editingAmount = 0;
   state.dialogTrigger = null;
   elements.editForm.reset();
   elements.editDialog.hidden = true;
@@ -599,7 +638,11 @@ async function handleEditSubmit(event) {
     return;
   }
 
-  const amount = Number(elements.editAmountInput.value);
+  const amount = state.editingAmount;
+  if (elements.editAmountDeltaInput.value !== "") {
+    elements.editError.textContent = "请先点击增加金额或减少金额应用本次调整";
+    return;
+  }
   const endDate = elements.editEndDateInput.value;
   if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_AMOUNT) {
     elements.editError.textContent = item.costMode === "daily"
@@ -631,7 +674,9 @@ async function handleEditSubmit(event) {
 
   state.isEditing = true;
   elements.editForm.setAttribute("aria-busy", "true");
-  elements.editAmountInput.disabled = true;
+  elements.editAmountDeltaInput.disabled = true;
+  elements.editAmountDecreaseButton.disabled = true;
+  elements.editAmountIncreaseButton.disabled = true;
   elements.editEndDateInput.disabled = true;
   elements.editAutoRenewInput.disabled = true;
   elements.editCancelButton.disabled = true;
@@ -661,7 +706,7 @@ async function handleEditSubmit(event) {
   } finally {
     state.isEditing = false;
     elements.editForm.removeAttribute("aria-busy");
-    elements.editAmountInput.disabled = false;
+    elements.editAmountDeltaInput.disabled = false;
     elements.editEndDateInput.disabled = false;
     elements.editAutoRenewInput.disabled = false;
     elements.editCancelButton.disabled = false;
@@ -881,9 +926,11 @@ async function handleSubmit(event) {
 elements.form.addEventListener("submit", handleSubmit);
 elements.editForm.addEventListener("submit", handleEditSubmit);
 elements.editCancelButton.addEventListener("click", closeEditDialog);
+elements.editAmountDecreaseButton.addEventListener("click", () => adjustEditAmount(-1));
+elements.editAmountIncreaseButton.addEventListener("click", () => adjustEditAmount(1));
 elements.editDayDecreaseButton.addEventListener("click", () => adjustEditEndDate(-1));
 elements.editDayIncreaseButton.addEventListener("click", () => adjustEditEndDate(1));
-elements.editAmountInput.addEventListener("input", () => {
+elements.editAmountDeltaInput.addEventListener("input", () => {
   elements.editError.textContent = "";
   syncEditPreview();
 });

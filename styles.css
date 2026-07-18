@@ -236,6 +236,7 @@ input:focus {
 .day-button,
 .edit-button,
 .stepper-button,
+.amount-adjust-button,
 .icon-button,
 .tab {
   border: 0;
@@ -532,6 +533,63 @@ td {
   margin: -4px 0 0;
   color: var(--muted);
   font-weight: 800;
+}
+
+.edit-amount-panel {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfcfb;
+}
+
+.edit-current-amount {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.edit-current-amount span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.edit-current-amount strong {
+  color: var(--brand-dark);
+  font-size: 21px;
+}
+
+.edit-amount-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.amount-adjust-button {
+  min-height: 42px;
+  border-radius: 7px;
+  font-weight: 800;
+}
+
+.amount-adjust-button.is-decrease {
+  background: #f4e7e2;
+  color: var(--accent);
+}
+
+.amount-adjust-button.is-increase {
+  background: var(--soft);
+  color: var(--brand-dark);
+}
+
+.amount-adjust-button.is-decrease:hover {
+  background: #eed8cf;
+}
+
+.amount-adjust-button.is-increase:hover {
+  background: #d8ebe4;
 }
 
 .edit-stepper {
