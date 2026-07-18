@@ -235,6 +235,7 @@ input:focus {
 .secondary-button,
 .day-button,
 .edit-button,
+.stepper-button,
 .icon-button,
 .tab {
   border: 0;
@@ -518,7 +519,7 @@ td {
 
 .modal-panel {
   display: grid;
-  width: min(100%, 360px);
+  width: min(100%, 460px);
   gap: 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -531,6 +532,66 @@ td {
   margin: -4px 0 0;
   color: var(--muted);
   font-weight: 800;
+}
+
+.edit-stepper {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.edit-field {
+  display: grid;
+  gap: 7px;
+}
+
+.stepper-button {
+  min-width: 58px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 9px;
+  background: var(--soft);
+  color: var(--brand-dark);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.stepper-button:hover {
+  background: #d8ebe4;
+}
+
+.edit-preview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.edit-preview > div {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 10px;
+  background: #fbfcfb;
+}
+
+.edit-preview span,
+.edit-preview strong {
+  display: block;
+}
+
+.edit-preview span {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.edit-preview strong {
+  color: var(--brand-dark);
+  font-size: 16px;
 }
 
 .modal-actions {
@@ -568,5 +629,14 @@ td {
 
   .summary-item {
     min-height: 88px;
+  }
+
+  .edit-stepper {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .edit-stepper input {
+    grid-column: 1 / -1;
+    grid-row: 1;
   }
 }

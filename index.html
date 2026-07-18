@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>每日平均固定支出</title>
-    <link rel="stylesheet" href="styles.css?v=20260718-pagination-status" />
+    <link rel="stylesheet" href="styles.css?v=20260718-edit-restock" />
   </head>
   <body>
     <main class="app-shell">
@@ -133,6 +133,32 @@
       <form class="modal-panel" id="editForm">
         <h2 id="editDialogTitle">编辑商品</h2>
         <p class="modal-item-name" id="editItemName"></p>
+        <label>
+          <span id="editAmountLabel">总金额</span>
+          <input id="editAmountInput" name="amount" type="number" min="0.01" max="1000000000" step="0.01" required />
+        </label>
+        <div class="edit-field">
+          <label for="editEndDateInput">结束日期</label>
+          <div class="edit-stepper">
+            <button class="stepper-button" id="editDayDecreaseButton" type="button" aria-label="结束日期减少1天">-1天</button>
+            <input id="editEndDateInput" name="endDate" type="date" min="1900-01-01" max="2100-12-31" required />
+            <button class="stepper-button" id="editDayIncreaseButton" type="button" aria-label="结束日期增加1天">+1天</button>
+          </div>
+        </div>
+        <div class="edit-preview" aria-live="polite">
+          <div>
+            <span>总使用天数</span>
+            <strong id="editUsageDays">-</strong>
+          </div>
+          <div>
+            <span>剩余天数</span>
+            <strong id="editRemainingDays">-</strong>
+          </div>
+          <div>
+            <span>日均成本</span>
+            <strong id="editDailyCost">-</strong>
+          </div>
+        </div>
         <label class="check-option">
           <input id="editAutoRenewInput" name="autoRenew" type="checkbox" />
           到期后自动续期
@@ -145,6 +171,6 @@
       </form>
     </div>
 
-    <script type="module" src="app.js?v=20260718-pagination-renewal"></script>
+    <script type="module" src="app.js?v=20260718-edit-restock"></script>
   </body>
 </html>

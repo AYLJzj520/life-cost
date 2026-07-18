@@ -9,6 +9,8 @@ import {
   isAllowedDateString,
 } from "./date-utils.js";
 
+const MAX_AMOUNT = 1_000_000_000;
+
 const state = {
   items: [],
   summary: {
@@ -73,6 +75,14 @@ const elements = {
   editDialog: document.querySelector("#editDialog"),
   editForm: document.querySelector("#editForm"),
   editItemName: document.querySelector("#editItemName"),
+  editAmountLabel: document.querySelector("#editAmountLabel"),
+  editAmountInput: document.querySelector("#editAmountInput"),
+  editEndDateInput: document.querySelector("#editEndDateInput"),
+  editDayDecreaseButton: document.querySelector("#editDayDecreaseButton"),
+  editDayIncreaseButton: document.querySelector("#editDayIncreaseButton"),
+  editUsageDays: document.querySelector("#editUsageDays"),
+  editRemainingDays: document.querySelector("#editRemainingDays"),
+  editDailyCost: document.querySelector("#editDailyCost"),
   editAutoRenewInput: document.querySelector("#editAutoRenewInput"),
   editCancelButton: document.querySelector("#editCancelButton"),
   editSubmitButton: document.querySelector("#editSubmitButton"),
@@ -412,6 +422,76 @@ async function updateEndDate(item, dayDelta) {
   }
 }
 
+function getEditingItem() {
+  return state.items.find((item) => item.id === state.editingItemId);
+}
+
+function getAdjustedEditEndDate(item, dayDelta) {
+  const endDate = elements.editEndDateInput.value;
+  if (!isAllowedDateString(endDate)) {
+    return null;
+  }
+
+  try {
+    const nextEndDate = addUsageDays(endDate, dayDelta, item.excludeWeekends);
+    if (
+      !isAllowedDateString(nextEndDate)
+      || nextEndDate < item.startDate
+      || getInclusiveDays(item.startDate, nextEndDate) > MAX_DATE_SPAN_DAYS
+    ) {
+      return null;
+    }
+    return nextEndDate;
+  } catch {
+    return null;
+  }
+}
+
+function syncEditPreview() {
+  const item = getEditingItem();
+  if (!item) {
+    return;
+  }
+
+  const amount = Number(elements.editAmountInput.value);
+  const endDate = elements.editEndDateInput.value;
+  const validAmount = Number.isFinite(amount) && amount > 0 && amount <= MAX_AMOUNT;
+  const validEndDate = isAllowedDateString(endDate)
+    && endDate >= item.startDate
+    && getInclusiveDays(item.startDate, endDate) <= MAX_DATE_SPAN_DAYS;
+  const usageDays = validEndDate
+    ? getUsageDays(item.startDate, endDate, item.excludeWeekends)
+    : 0;
+  const previewItem = { ...item, endDate };
+  const remainingDays = usageDays > 0 ? getRemainingUsageDays(previewItem) : 0;
+  const dailyCost = validAmount && usageDays > 0
+    ? item.costMode === "daily" ? amount : amount / usageDays
+    : NaN;
+
+  elements.editUsageDays.textContent = usageDays > 0 ? `${usageDays} 天` : "-";
+  elements.editRemainingDays.textContent = usageDays > 0 ? `${remainingDays} 天` : "-";
+  elements.editDailyCost.textContent = Number.isFinite(dailyCost) ? formatCurrency(dailyCost) : "-";
+
+  elements.editDayDecreaseButton.disabled = state.isEditing || !getAdjustedEditEndDate(item, -1);
+  elements.editDayIncreaseButton.disabled = state.isEditing || !getAdjustedEditEndDate(item, 1);
+}
+
+function adjustEditEndDate(dayDelta) {
+  const item = getEditingItem();
+  if (!item) {
+    return;
+  }
+
+  const nextEndDate = getAdjustedEditEndDate(item, dayDelta);
+  if (!nextEndDate) {
+    return;
+  }
+
+  elements.editEndDateInput.value = nextEndDate;
+  elements.editError.textContent = "";
+  syncEditPreview();
+}
+
 function openEditDialog(item) {
   if (state.pendingItemIds.has(item.id)) {
     return;
@@ -420,10 +500,15 @@ function openEditDialog(item) {
   state.editingItemId = item.id;
   state.dialogTrigger = document.activeElement;
   elements.editItemName.textContent = item.name;
+  elements.editAmountLabel.textContent = item.costMode === "daily" ? "每日成本" : "总金额";
+  elements.editAmountInput.value = String(item.costMode === "daily" ? item.dailyCost : item.price);
+  elements.editEndDateInput.min = item.startDate;
+  elements.editEndDateInput.value = item.endDate;
   elements.editAutoRenewInput.checked = item.autoRenew;
   elements.editError.textContent = "";
   elements.editDialog.hidden = false;
-  elements.editAutoRenewInput.focus();
+  syncEditPreview();
+  elements.editAmountInput.focus();
 }
 
 function closeEditDialog() {
@@ -514,32 +599,76 @@ async function handleEditSubmit(event) {
     return;
   }
 
+  const amount = Number(elements.editAmountInput.value);
+  const endDate = elements.editEndDateInput.value;
+  if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_AMOUNT) {
+    elements.editError.textContent = item.costMode === "daily"
+      ? `每日成本必须大于 0 且不超过 ${MAX_AMOUNT}`
+      : `价格必须大于 0 且不超过 ${MAX_AMOUNT}`;
+    return;
+  }
+
+  if (!isAllowedDateString(endDate)) {
+    elements.editError.textContent = "请选择有效结束日期";
+    return;
+  }
+
+  const calendarDays = getInclusiveDays(item.startDate, endDate);
+  if (calendarDays <= 0) {
+    elements.editError.textContent = "结束日期不能早于使用日期";
+    return;
+  }
+
+  if (calendarDays > MAX_DATE_SPAN_DAYS) {
+    elements.editError.textContent = `使用日期跨度不能超过 ${MAX_DATE_SPAN_DAYS} 天`;
+    return;
+  }
+
+  if (getUsageDays(item.startDate, endDate, item.excludeWeekends) <= 0) {
+    elements.editError.textContent = "使用区间至少需要包含 1 天";
+    return;
+  }
+
   state.isEditing = true;
   elements.editForm.setAttribute("aria-busy", "true");
+  elements.editAmountInput.disabled = true;
+  elements.editEndDateInput.disabled = true;
   elements.editAutoRenewInput.disabled = true;
   elements.editCancelButton.disabled = true;
   elements.editSubmitButton.disabled = true;
+  syncEditPreview();
 
   try {
+    const payload = {
+      endDate,
+      autoRenew: elements.editAutoRenewInput.checked,
+      [item.costMode === "daily" ? "dailyCost" : "price"]: amount,
+    };
     const data = await fetchJson(`/api/items/${encodeURIComponent(item.id)}`, {
       method: "PATCH",
       headers: {
         "content-type": "application/json",
       },
-      body: JSON.stringify({ autoRenew: elements.editAutoRenewInput.checked }),
+      body: JSON.stringify(payload),
     });
 
     state.items = state.items.map((currentItem) => (currentItem.id === item.id ? data.item : currentItem));
     state.isEditing = false;
     closeEditDialog();
+    await loadItems(state.view === "archived" ? state.archivePagination.page : undefined);
   } catch (error) {
     elements.editError.textContent = error.message;
   } finally {
     state.isEditing = false;
     elements.editForm.removeAttribute("aria-busy");
+    elements.editAmountInput.disabled = false;
+    elements.editEndDateInput.disabled = false;
     elements.editAutoRenewInput.disabled = false;
     elements.editCancelButton.disabled = false;
     elements.editSubmitButton.disabled = false;
+    if (!elements.editDialog.hidden) {
+      syncEditPreview();
+    }
     render();
   }
 }
@@ -752,6 +881,16 @@ async function handleSubmit(event) {
 elements.form.addEventListener("submit", handleSubmit);
 elements.editForm.addEventListener("submit", handleEditSubmit);
 elements.editCancelButton.addEventListener("click", closeEditDialog);
+elements.editDayDecreaseButton.addEventListener("click", () => adjustEditEndDate(-1));
+elements.editDayIncreaseButton.addEventListener("click", () => adjustEditEndDate(1));
+elements.editAmountInput.addEventListener("input", () => {
+  elements.editError.textContent = "";
+  syncEditPreview();
+});
+elements.editEndDateInput.addEventListener("input", () => {
+  elements.editError.textContent = "";
+  syncEditPreview();
+});
 elements.editDialog.addEventListener("click", (event) => {
   if (event.target === elements.editDialog && !state.isEditing) {
     closeEditDialog();

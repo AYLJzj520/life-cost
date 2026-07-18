@@ -66,14 +66,16 @@ export async function onRequestPatch(context) {
     }
 
     const payload = await readJsonObject(context.request);
-    const allowedFields = new Set(["endDate", "autoRenew"]);
+    const allowedFields = new Set(["endDate", "autoRenew", "price", "dailyCost"]);
     if (Object.keys(payload).some((key) => !allowedFields.has(key))) {
       throw new RequestError("请求包含不支持的更新字段");
     }
 
     const hasEndDate = "endDate" in payload;
     const hasAutoRenew = "autoRenew" in payload;
-    if (!hasEndDate && !hasAutoRenew) {
+    const hasPrice = "price" in payload;
+    const hasDailyCost = "dailyCost" in payload;
+    if (!hasEndDate && !hasAutoRenew && !hasPrice && !hasDailyCost) {
       throw new RequestError("没有可更新的内容");
     }
 
@@ -87,7 +89,33 @@ export async function onRequestPatch(context) {
       return json({ error: "商品不存在" }, 404);
     }
 
-    if (!hasEndDate) {
+    if (hasPrice && item.costMode !== "total") {
+      throw new RequestError("每日固定成本商品不能修改总金额");
+    }
+
+    if (hasDailyCost && item.costMode !== "daily") {
+      throw new RequestError("总价分摊商品不能修改每日成本");
+    }
+
+    if (hasPrice && (
+      typeof payload.price !== "number"
+      || !Number.isFinite(payload.price)
+      || payload.price <= 0
+      || payload.price > MAX_AMOUNT
+    )) {
+      throw new RequestError(`价格必须大于 0 且不超过 ${MAX_AMOUNT}`);
+    }
+
+    if (hasDailyCost && (
+      typeof payload.dailyCost !== "number"
+      || !Number.isFinite(payload.dailyCost)
+      || payload.dailyCost <= 0
+      || payload.dailyCost > MAX_AMOUNT
+    )) {
+      throw new RequestError(`每日成本必须大于 0 且不超过 ${MAX_AMOUNT}`);
+    }
+
+    if (!hasEndDate && !hasPrice && !hasDailyCost) {
       await context.env.DB.prepare("UPDATE items SET auto_renew = ? WHERE id = ?")
         .bind(autoRenew ? 1 : 0, id)
         .run();
@@ -95,7 +123,8 @@ export async function onRequestPatch(context) {
       return json({ item: { ...item, autoRenew } });
     }
 
-    const calendarDays = getInclusiveDays(item.startDate, payload.endDate);
+    const endDate = hasEndDate ? payload.endDate : item.endDate;
+    const calendarDays = getInclusiveDays(item.startDate, endDate);
     if (calendarDays <= 0) {
       throw new RequestError("结束日期不能早于使用日期");
     }
@@ -104,28 +133,41 @@ export async function onRequestPatch(context) {
       throw new RequestError(`使用日期跨度不能超过 ${MAX_DATE_SPAN_DAYS} 天`);
     }
 
-    const plannedDays = getUsageDays(item.startDate, payload.endDate, item.excludeWeekends);
+    const plannedDays = getUsageDays(item.startDate, endDate, item.excludeWeekends);
     if (plannedDays <= 0) {
       throw new RequestError("使用区间至少需要包含 1 天");
     }
 
-    const price = item.costMode === "daily" ? Number(item.dailyCost) * plannedDays : item.price;
+    let dailyCost = null;
+    let price;
+    if (item.costMode === "daily") {
+      dailyCost = hasDailyCost ? payload.dailyCost : Number(item.dailyCost);
+      price = dailyCost * plannedDays;
+    } else {
+      price = hasPrice ? payload.price : Number(item.price);
+    }
+
+    if (item.costMode === "daily" && (!Number.isFinite(dailyCost) || dailyCost <= 0 || dailyCost > MAX_AMOUNT)) {
+      throw new RequestError(`每日成本必须大于 0 且不超过 ${MAX_AMOUNT}`);
+    }
+
     if (!Number.isFinite(price) || price <= 0 || price > MAX_AMOUNT) {
       throw new RequestError(`价格必须大于 0 且不超过 ${MAX_AMOUNT}`);
     }
 
     const nextAutoRenew = hasAutoRenew ? autoRenew : item.autoRenew;
     await context.env.DB.prepare(
-      "UPDATE items SET end_date = ?, planned_days = ?, price = ?, auto_renew = ? WHERE id = ?",
+      "UPDATE items SET end_date = ?, planned_days = ?, price = ?, daily_cost = ?, auto_renew = ? WHERE id = ?",
     )
-      .bind(payload.endDate, plannedDays, price, nextAutoRenew ? 1 : 0, id)
+      .bind(endDate, plannedDays, price, dailyCost, nextAutoRenew ? 1 : 0, id)
       .run();
 
     return json({
       item: {
         ...item,
         price,
-        endDate: payload.endDate,
+        dailyCost,
+        endDate,
         plannedDays,
         autoRenew: nextAutoRenew,
       },
